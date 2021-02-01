@@ -47,64 +47,59 @@ class MAML(torch.nn.Module):
                 lr=self.meta_lr)
         self.inner_loss = torch.nn.MSELoss(reduction='sum')
         self.meta_loss = torch.nn.MSELoss(reduction='sum')
-        # TODO: Make this a tensor of parameters of the size of the learner's
-        # parameters
-        # self.theta = torch.nn.Parameter(torch.randn(()))
 
-    def forward(self, task):
-        # Step 1. Meta-train with K samples from a task T
-        task.shuffle()
-        m_train, m_test = task[:self.K], task[self.K:]
-        inner_grads = {}
-        # TODO: vectorize this loop if possible
-        for s in range(self.inner_steps):
-            # TODO: Refactor this if possible. The gradients should be
-            # accumulated on each tensor, meaning that inner_grads{} would
-            # be written only after the for loop. Wait actually the two loops
-            # might be nested the wrong way...
-            self.learner.zero_grad()
-            for i, (x, y) in enumerate(m_train):
+    def forward(self, tasks_batch):
+        for i, task in enumerate(tasks_batch):
+            # Step 1. Meta-train with K samples from a task T
+            task.shuffle()
+            m_train, m_test = task[:self.K], task[self.K:]
+            # assert len(m_train) == len(m_test), "Both meta-batches should contain the same amount of tasks"
+            inner_grads = {}
+            # TODO: vectorize this loop if possible
+            for s in range(self.inner_steps):
+                # TODO: Refactor this if possible. The gradients should be
+                # accumulated on each tensor, meaning that inner_grads{} would
+                # be written only after the for loop. Wait actually the two loops
+                # might be nested the wrong way...
+                self.learner.zero_grad()
+                for x, y in m_train:
+                    self.inner_optim.zero_grad()
+                    y_pred = self.learner(x)[0]
+                    print("y_pred: ", y_pred, "y: ", y)
+                    loss = self.inner_loss(y_pred, y)
+                    print(f"Loss={loss}")
+                    # Actually do not improve the model yet! Keep the
+                    # gradient on the side. But do use those gradients to
+                    # temporarily update the model during meta-testing for the
+                    # loss of the meta-objective!
+                    grad = torch.autograd.grad(loss,
+                            self.learner.parameters())
+                    print(f"Grad={grad}")
+                    if i not in inner_grads:
+                        # First innit the gradient for that task if not set
+                        inner_grads[i] = list(grad)
+                    else:
+                        for j, tensor in enumerate(inner_grads[i]):
+                            tensor += grad[j]
+            # Step 2. Meta-test with X (N-K?) samples from task T
+            # First, save the parameters
+            initial_param = self.learner.net.state_dict()
+            print(initial_param)
+            meta_loss = 0
+            # TODO: vectorize this loop if possible
+            for x, y in m_test:
+                '''For each task in m_test'''
                 self.inner_optim.zero_grad()
-                y_pred = self.learner(x)[0]
-                print("y_pred: ", y_pred, "y: ", y)
-                loss = self.inner_loss(y_pred, y)
-                print(f"Loss={loss}")
-                # Actually do not improve the model yet! Keep the
-                # gradient on the side. But do use those gradients to
-                # temporarily update the model during meta-testing for the
-                # loss of the meta-objective!
-                grad = torch.autograd.grad(loss,
-                        self.learner.parameters())
-                print(f"Grad={grad}")
-                if i not in inner_grads:
-                    # First innit the gradient for that task if not set
-                    inner_grads[i] = grad
-                else:
-                    # TODO: This doesn't work! The gradient is the same and the
-                    # tensors are not added together!
-                    print(f"Incrementing inner grad of task {i} from {inner_grads[i]} with +grad = {grad}")
-                    inner_grads[i] += grad
-                    print(f"To {inner_grads[i]}")
-        # Step 2. Meta-test with X (N-K?) samples from task T
-        # First, save the parameters
-        initial_param = self.learner.net.state_dict()
-        print(initial_param)
-        meta_loss = 0
-        # TODO: vectorize this loop if possible
-        # TODO: WTF DO I DO WHEN I > len(m_train) ?????
-        for i, (x, y) in enumerate(m_test):
-            '''For each task in m_test'''
-            self.inner_optim.zero_grad()
-            with torch.no_grad():
-                # Parse all initial parameters and replace them one by one
-                for k, v in initial_param.items():
-                    setattr(self.learner.net, k, torch.nn.Parameter(v))
-                # Update the parameters with the accumulated gradients on that task
-                for j, (k, v) in enumerate(initial_param.items()):
-                    setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * inner_grads[i][j])))
-                y_pred = self.learner(x)
-                # TODO: Accumulate the loss over all tasks in the meta-testing set
-                meta_loss += self.inner_loss(y_pred, y)
+                with torch.no_grad():
+                    # Parse all initial parameters and replace them one by one
+                    for k, v in initial_param.items():
+                        setattr(self.learner.net, k, torch.nn.Parameter(v))
+                    # Update the parameters with the accumulated gradients on that task
+                    for j, (k, v) in enumerate(initial_param.items()):
+                        setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * inner_grads[i][j])))
+                    y_pred = self.learner(x)
+                    # TODO: Accumulate the loss over all tasks in the meta-testing set
+                    meta_loss += self.inner_loss(y_pred, y)
 
         # Step 3. Now that the meta-loss is computed
         meta_loss.backward()
@@ -114,6 +109,10 @@ class MAML(torch.nn.Module):
 
     def fit(self, dataset: List[tuple]):
         # t = np.random.choice(dataset)
-        t = dataset[0]
-        self.forward(t)
+        # TODO: For all tasks, or maybe a batch of tasks:
+        batch = dataset[:2]
+        cum_inner_loss = self.forward(batch)
+        # TODO: Meta-testing here?
+        # TODO: Computation of the meta-objective here?
+        # TODO: Meta-optimization here?
 

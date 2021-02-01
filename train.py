@@ -69,7 +69,7 @@ def train(dataset, K=5):
 
 def prepare_omniglot():
     print("[*] Loading Omniglot...")
-    omniglot = torchvision.datasets.Omniglot(root='./omniglot/',
+    omniglot = torchvision.datasets.Omniglot(root='./datasets/',
             download=True)
     omniglot_loader = torch.utils.data.DataLoader(omniglot, batch_size=4,
             shuffle=True, num_workers=6)
