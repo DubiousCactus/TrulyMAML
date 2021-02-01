@@ -16,7 +16,8 @@ import torchvision
 import torch
 import math
 
-from maml import MAML, DummiePolyLearner
+from learner import DummiePolyLearner
+from maml import MAML
 
 from typing import List
 from tqdm import tqdm
@@ -49,7 +50,7 @@ def train(dataset, K=5):
     train, test = dataset[:t_size], dataset[t_size:]
 
     model = MAML(DummiePolyLearner())
-    model.fit(train)
+    model.fit(train, 100)
     # TODO: Maybe implement MAML's training within MAML itself
    #  criterion = torch.nn.MSELoss(reduction='sum')
     # optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
