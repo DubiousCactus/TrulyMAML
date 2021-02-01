@@ -91,24 +91,17 @@ class MAML(torch.nn.Module):
         print(initial_param)
         meta_loss = 0
         # TODO: vectorize this loop if possible
+        # TODO: WTF DO I DO WHEN I > len(m_train) ?????
         for i, (x, y) in enumerate(m_test):
             '''For each task in m_test'''
             self.inner_optim.zero_grad()
             with torch.no_grad():
-                # TODO: Parse all initial parameters and replace them one by
-                # one
-                # for param in initial_param:
-                    # self.learner.net.
+                # Parse all initial parameters and replace them one by one
                 for k, v in initial_param.items():
-                    print(f"self.learner.{k}=", getattr(self.learner, k))
-                    setattr(self.learner, k, v)
-                    print(f"self.learner.{k}=", getattr(self.learner, k))
+                    setattr(self.learner.net, k, torch.nn.Parameter(v))
                 # Update the parameters with the accumulated gradients on that task
-                # self.learner.weight = initial_param['weight']
-                # print("Initial weights: ", self.learner.weight, "Inner grads: ", inner_grads[i])
-                # for k, v in inner_grads[i]:
-                    # eval(self.learner.k) -= self.meta_lr * v
-                # self.learner.weight -= self.meta_lr * inner_grads[i]
+                for j, (k, v) in enumerate(initial_param.items()):
+                    setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * inner_grads[i][j])))
                 y_pred = self.learner(x)
                 # TODO: Accumulate the loss over all tasks in the meta-testing set
                 meta_loss += self.inner_loss(y_pred, y)
