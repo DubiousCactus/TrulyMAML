@@ -81,9 +81,9 @@ class MAML(torch.nn.Module):
             # Restore initial parameters for learner
             for k, v in initial_param.items():
                 setattr(self.learner.net, k, torch.nn.Parameter(v))
-            print(f"Meta-testing Cummulative Loss={meta_loss}")
 
         # Step 3. Now that the meta-loss is computed
+        print(f"Meta-testing Cummulative Loss={meta_loss}")
         # For now, let's try a manual parameter update
         meta_gradient = torch.autograd.grad(meta_loss,
                 self.learner.parameters(), allow_unused=True)
