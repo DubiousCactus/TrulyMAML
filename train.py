@@ -16,7 +16,7 @@ import torchvision
 import torch
 import math
 
-from learner import DummiePolyLearner
+from learner import DummiePolyLearner, MLP
 from maml import MAML
 
 from typing import List
@@ -49,7 +49,7 @@ def train(dataset, K=5):
     t_size = int(0.7*len(dataset))
     train, test = dataset[:t_size], dataset[t_size:]
 
-    model = MAML(DummiePolyLearner())
+    model = MAML(MLP())
     model.fit(train, 50)
     model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
@@ -68,6 +68,25 @@ def train(dataset, K=5):
         # optimizer.step()
     print("[*] Done!")
 
+
+def conventional_train(dataset):
+    print("[*] Training with a conventional optimizer...")
+    # Make the training / eval splits
+    t_size = int(0.7*len(dataset))
+    train, test = dataset[:t_size], dataset[t_size:]
+    model = MLP()
+    optimizer = torch.optim.Adam(model.parameters())
+    criterion = torch.nn.MSELoss(reduction='sum')
+    task = train[0]
+    for i in range(2000):
+        task.shuffle()
+        y_pred = model(task[0][0])
+        loss = criterion(y_pred, task[0][1])
+        if i % 100 == 99:
+            print(i, loss.item())
+        optimizer.zero_grad()
+        loss.backward()
+        optimizer.step()
 
 def prepare_omniglot():
     print("[*] Loading Omniglot...")
@@ -91,7 +110,8 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 
 
 def main():
-    train(prepare_sinewave(100))
+    # train(prepare_sinewave(100))
+    conventional_train(prepare_sinewave(10))
 
 
 if __name__ == "__main__":

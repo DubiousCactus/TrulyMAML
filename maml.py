@@ -20,7 +20,7 @@ from typing import List
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-6, inner_lr=1e-3, K=1, steps=1):
+            meta_lr=1e-4, inner_lr=1e-2, K=10, steps=1):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
@@ -39,7 +39,7 @@ class MAML(torch.nn.Module):
 
     def forward(self, tasks_batch):
         # For each task in the batch
-        initial_param = self.learner.net.state_dict()
+        initial_param = self.learner.state_dict()
         meta_loss = 0
         self.learner.zero_grad()
         for i, task in enumerate(tasks_batch):
@@ -110,7 +110,7 @@ class MAML(torch.nn.Module):
         # Sample a batch of tasks
         for i in range(iterations):
             random.shuffle(dataset)
-            batch = dataset[:6]
+            batch = dataset[:8]
             self.forward(batch)
         # TODO: Meta-testing here?
         # TODO: Computation of the meta-objective here?
