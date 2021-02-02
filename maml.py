@@ -41,16 +41,17 @@ class MAML(torch.nn.Module):
         # For each task in the batch
         initial_param = self.learner.net.state_dict()
         meta_loss = 0
+        self.learner.zero_grad()
         for i, task in enumerate(tasks_batch):
             # Step 1. Meta-train with K samples from a task T
             task.shuffle()
             m_train, m_test = task[:self.K], task[self.K:]
             inner_grads = {}
-            # TODO: vectorize this loop if possible
+            # # TODO: vectorize this loop if possible
             for s in range(self.inner_steps):
-                self.learner.zero_grad()
+                # self.learner.zero_grad()
                 for x, y in m_train:
-                    self.inner_optim.zero_grad()
+                    # self.inner_optim.zero_grad()
                     y_pred = self.learner(x)[0]
                     loss = self.inner_loss(y_pred, y)
                     # print(f"Meta-training Loss={loss}")
@@ -69,8 +70,9 @@ class MAML(torch.nn.Module):
             # Update the parameters with the accumulated gradients on that task
             # TODO: Do we update the parameters continuously for the whole
             # batch or reset at each task?
-            for j, (k, v) in enumerate(initial_param.items()):
-                setattr(self.learner.net, k, torch.nn.Parameter(v - (self.inner_lr * inner_grads[i][j])))
+            with torch.no_grad():
+                for j, (k, v) in enumerate(initial_param.items()):
+                    setattr(self.learner.net, k, torch.nn.Parameter(v - (self.inner_lr * inner_grads[i][j])))
             # TODO: vectorize this loop if possible
             for x, y in m_test:
                 '''For each task in m_test'''
@@ -78,16 +80,33 @@ class MAML(torch.nn.Module):
                 y_pred = self.learner(x)
                 # Accumulate the loss over all tasks in the meta-testing set
                 meta_loss += self.meta_loss(y_pred, y)
+                # self.learner.zero_grad()
+                # loss = self.meta_loss(y_pred, y)
+                # loss.backward()
+
             # Restore initial parameters for learner
-            for k, v in initial_param.items():
-                setattr(self.learner.net, k, torch.nn.Parameter(v))
+            # TODO: Find a workaround for this problem:
+            #       When the parameters are replaced, the gradient can't be
+            #       computed with respect to the computed loss with the
+            #       previous gradient values!
+  #           with torch.no_grad():
+                # for k, v in initial_param.items():
+  #                   setattr(self.learner.net, k, torch.nn.Parameter(v))
 
         # Step 3. Now that the meta-loss is computed
         print(f"Meta-testing Cummulative Loss={meta_loss}")
+        # with torch.no_grad():
+            # for param in self.learner.parameters():
+                # print(param.grad)
+                # param -= self.meta_lr * param.grad
+        # meta_loss.backward()
+        # with torch.no_grad():
+            # for param in self.learner.parameters():
+                # print(param.grad)
         # For now, let's try a manual parameter update
         meta_gradient = torch.autograd.grad(meta_loss,
-                self.learner.parameters(), allow_unused=True)
-        print(f"Meta-gradient: {meta_gradient}")
+                self.learner.parameters())
+        # print(f"Meta-gradient: {meta_gradient}")
         assert None not in meta_gradient, "Empty meta-gradient!"
         for j, (k, v) in enumerate(initial_param.items()):
             setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * meta_gradient[j])))

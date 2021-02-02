@@ -50,7 +50,8 @@ def train(dataset, K=5):
     train, test = dataset[:t_size], dataset[t_size:]
 
     model = MAML(DummiePolyLearner())
-    model.fit(train, 100)
+    model.fit(train, 50)
+    model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
    #  criterion = torch.nn.MSELoss(reduction='sum')
     # optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
