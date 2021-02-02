@@ -13,6 +13,7 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torchvision
+import random
 import torch
 import math
 
@@ -25,8 +26,8 @@ from PIL import Image
 
 
 class SineWaveDataset(torch.utils.data.Dataset):
-    def __init__(self, samples=2000):
-        x = torch.linspace(-math.pi, math.pi, samples)
+    def __init__(self, samples=1000):
+        x = torch.linspace(-5.0, 5.0, samples)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         y = magnitude * torch.sin(x + phase)
         self.samples = torch.stack((x, y)).T
@@ -50,7 +51,7 @@ def train(dataset, K=5):
     train, test = dataset[:t_size], dataset[t_size:]
 
     model = MAML(MLP())
-    model.fit(train, 50)
+    model.fit(train, 150)
     model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
    #  criterion = torch.nn.MSELoss(reduction='sum')
@@ -72,21 +73,32 @@ def train(dataset, K=5):
 def conventional_train(dataset):
     print("[*] Training with a conventional optimizer...")
     # Make the training / eval splits
-    t_size = int(0.7*len(dataset))
-    train, test = dataset[:t_size], dataset[t_size:]
+    task = dataset[0]
+    t_size = int(0.7*len(task))
+    task.shuffle()
+    train, test = task[:t_size], task[t_size:]
     model = MLP()
     optimizer = torch.optim.Adam(model.parameters())
     criterion = torch.nn.MSELoss(reduction='sum')
-    task = train[0]
-    for i in range(2000):
-        task.shuffle()
-        y_pred = model(task[0][0])
-        loss = criterion(y_pred, task[0][1])
+    for i in range(1000):
+        random.shuffle(train)
+        loss = 0
+        optimizer.zero_grad()
+        for x, y in train[:10]:
+            y_pred = model(x)
+            loss += criterion(y_pred, y)
         if i % 100 == 99:
             print(i, loss.item())
-        optimizer.zero_grad()
         loss.backward()
         optimizer.step()
+
+    print("[*] Evaluating...")
+    total_loss = 0
+    for x, y in test:
+        y_pred = model(x)
+        loss = criterion(y_pred, y)
+        total_loss += loss
+    print(f"[*] Total evaluation loss: {total_loss}")
 
 def prepare_omniglot():
     print("[*] Loading Omniglot...")
@@ -110,8 +122,8 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 
 
 def main():
-    # train(prepare_sinewave(100))
-    conventional_train(prepare_sinewave(10))
+    train(prepare_sinewave(100))
+    # conventional_train(prepare_sinewave(10))
 
 
 if __name__ == "__main__":
