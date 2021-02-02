@@ -20,7 +20,7 @@ from typing import List
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-6, inner_lr=1e-6, K=1, steps=1):
+            meta_lr=1e-6, inner_lr=1e-3, K=1, steps=1):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
@@ -95,18 +95,9 @@ class MAML(torch.nn.Module):
 
         # Step 3. Now that the meta-loss is computed
         print(f"Meta-testing Cummulative Loss={meta_loss}")
-        # with torch.no_grad():
-            # for param in self.learner.parameters():
-                # print(param.grad)
-                # param -= self.meta_lr * param.grad
-        # meta_loss.backward()
-        # with torch.no_grad():
-            # for param in self.learner.parameters():
-                # print(param.grad)
         # For now, let's try a manual parameter update
         meta_gradient = torch.autograd.grad(meta_loss,
                 self.learner.parameters())
-        # print(f"Meta-gradient: {meta_gradient}")
         assert None not in meta_gradient, "Empty meta-gradient!"
         for j, (k, v) in enumerate(initial_param.items()):
             setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * meta_gradient[j])))
@@ -118,9 +109,13 @@ class MAML(torch.nn.Module):
         # t = np.random.choice(dataset)
         # Sample a batch of tasks
         for i in range(iterations):
+            random.shuffle(dataset)
             batch = dataset[:6]
             self.forward(batch)
         # TODO: Meta-testing here?
         # TODO: Computation of the meta-objective here?
         # TODO: Meta-optimization here?
+
+    def eval(self, dataset: List[tuple]):
+        pass
 

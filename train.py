@@ -27,7 +27,7 @@ from PIL import Image
 class SineWaveDataset(torch.utils.data.Dataset):
     def __init__(self, samples=2000):
         x = torch.linspace(-math.pi, math.pi, samples)
-        phase, magnitude = np.random.uniform(-math.pi, math.pi), np.random.rand()
+        phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         y = magnitude * torch.sin(x + phase)
         self.samples = torch.stack((x, y)).T
 
