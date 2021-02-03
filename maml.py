@@ -43,10 +43,13 @@ class MAML(torch.nn.Module):
         meta_loss = 0
         passes = 0
         self.learner.zero_grad()
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         for i, task in enumerate(tasks_batch):
             # Step 1. Meta-train with K samples from a task T
             task.shuffle()
             m_train, m_test = task[:self.K], task[self.K:]
+            m_train.to(device)
+            m_test.to(device)
             inner_grads = {}
             # # TODO: vectorize this loop if possible
             for s in range(self.inner_steps):
@@ -106,7 +109,7 @@ class MAML(torch.nn.Module):
   #                   setattr(self.learner.net, k, torch.nn.Parameter(v))
 
         # Step 3. Now that the meta-loss is computed
-        avg_loss = meta_loss / passes
+        avg_loss = meta_loss.item() / passes
         print(f"Meta-testing Average Loss={avg_loss}")
         # For now, let's try a manual parameter update
   #       meta_gradient = torch.autograd.grad(meta_loss,

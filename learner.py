@@ -13,6 +13,7 @@ Dummy learner examples. Hopefully drop in your own!
 
 import torch.nn.functional as F
 import torch.nn as nn
+import torch
 
 
 class DummiePolyLearner(nn.Module):
@@ -38,12 +39,12 @@ class MLP(nn.Module):
                 # nn.ReLU(),
                 # nn.Linear(40, 1))
         self.lin1 = nn.Linear(1, 40)
-        self.lin2 = nn.Linear(40, 40)
+        # self.lin2 = nn.Linear(40, 40)
         self.lin3 = nn.Linear(40, 1)
 
 
     def forward(self, x):
-        # return self.net(x.unsqueeze(dim=0))
+        # print(x)
         x = self.lin1(x)
-        x = self.lin2(F.relu(x))
+        # x = self.lin2(F.relu(x))
         return self.lin3(F.relu(x))

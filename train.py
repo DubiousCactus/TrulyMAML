@@ -25,12 +25,17 @@ from tqdm import tqdm
 from PIL import Image
 
 
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = "cpu"
+
+
 class SineWaveDataset(torch.utils.data.Dataset):
     def __init__(self, samples=5000):
-        x = torch.linspace(-5.0, 5.0, samples)
+        x = torch.linspace(-5.0, 5.0, samples, device=device)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
-        y = magnitude * torch.sin(x + phase)
-        self.samples = torch.stack((x, y)).T
+        self.sin = lambda x: magnitude * torch.sin(x + phase)
+        y = self.sin(x).to(device)
+        self.samples = torch.stack((x, y)).T.to(device)
 
     def shuffle(self):
         self.samples = self.samples[torch.randperm(self.samples.size()[0]),:]
@@ -40,17 +45,19 @@ class SineWaveDataset(torch.utils.data.Dataset):
 
 
     def __getitem__(self, idx):
+        assert self.sin(self.samples[idx][0][0]) == self.samples[idx][0][1], "Sample pairs are wrong!"
         return self.samples[idx]
 
 
 
-def train(dataset, K=5):
+def train(dataset, learner):
     print("[*] Training...")
     # Make the training / eval splits
     t_size = int(0.7*len(dataset))
     train, test = dataset[:t_size], dataset[t_size:]
 
-    model = MAML(MLP())
+    model = MAML(learner)
+    model.to(device)
     model.fit(train, 150)
     model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
@@ -70,35 +77,49 @@ def train(dataset, K=5):
     print("[*] Done!")
 
 
-def conventional_train(dataset):
+def conventional_train(dataset, learner):
     print("[*] Training with a conventional optimizer...")
     # Make the training / eval splits
     task = dataset[0]
+    batch_size = 10
     t_size = int(0.7*len(task))
     task.shuffle()
     train, test = task[:t_size], task[t_size:]
-    model = MLP()
+    model = learner
     optimizer = torch.optim.Adam(model.parameters())
     criterion = torch.nn.MSELoss(reduction='sum')
-    for i in range(1000):
-        random.shuffle(train)
+    print("[*] Evaluating with random initialization...")
+    total_loss = 0
+    for x, y in test:
+        y_pred = model(x.unsqueeze(dim=0))[0]
+        loss = criterion(y_pred, y)
+        total_loss += loss
+    avg_loss = total_loss.item() / len(test)
+
+    print(f"[*] Average evaluation loss: {avg_loss}")
+    for i in range(2000):
+        indices = torch.randperm(len(train))[:batch_size]
+        batch = train[indices]
         loss = 0
         optimizer.zero_grad()
-        for x, y in train[:10]:
-            y_pred = model(x)
+        for x, y in batch:
+            y_pred = model(x.unsqueeze(dim=0))[0]
             loss += criterion(y_pred, y)
         if i % 100 == 99:
-            print(i, loss.item())
+            print(i, loss.item()/batch_size)
         loss.backward()
         optimizer.step()
 
     print("[*] Evaluating...")
+    model.eval()
     total_loss = 0
-    for x, y in test:
-        y_pred = model(x)
-        loss = criterion(y_pred, y)
-        total_loss += loss
-    print(f"[*] Total evaluation loss: {total_loss}")
+    with torch.no_grad():
+        for x, y in test:
+            y_pred = model(x.unsqueeze(dim=0))[0]
+            loss = criterion(y_pred, y)
+            total_loss += loss
+    avg_loss = total_loss.item() / len(test)
+    print(f"[*] Average evaluation loss: {avg_loss}")
 
 def prepare_omniglot():
     print("[*] Loading Omniglot...")
@@ -122,8 +143,10 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 
 
 def main():
-    train(prepare_sinewave(50))
-    # conventional_train(prepare_sinewave(10))
+    learner = MLP()
+    learner.to(device)
+    # train(prepare_sinewave(50), learner)
+    conventional_train(prepare_sinewave(1), learner)
 
 
 if __name__ == "__main__":
