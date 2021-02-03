@@ -39,8 +39,9 @@ class MAML(torch.nn.Module):
 
     def forward(self, tasks_batch):
         # For each task in the batch
-        initial_param = self.learner.state_dict()
+        initial_param = list(self.learner.named_parameters())
         meta_loss = 0
+        passes = 0
         self.learner.zero_grad()
         for i, task in enumerate(tasks_batch):
             # Step 1. Meta-train with K samples from a task T
@@ -52,7 +53,7 @@ class MAML(torch.nn.Module):
                 # self.learner.zero_grad()
                 for x, y in m_train:
                     # self.inner_optim.zero_grad()
-                    y_pred = self.learner(x)[0]
+                    y_pred = self.learner(x.unsqueeze(dim=0))[0]
                     loss = self.inner_loss(y_pred, y)
                     # print(f"Meta-training Loss={loss}")
                     # Actually do not improve the model yet! Keep the
@@ -70,16 +71,27 @@ class MAML(torch.nn.Module):
             # Update the parameters with the accumulated gradients on that task
             # TODO: Do we update the parameters continuously for the whole
             # batch or reset at each task?
+#             with torch.no_grad():
+                # for j, param in enumerate(self.learner.parameters()):
+#                     param -= self.inner_lr * inner_grads[i][j]
             with torch.no_grad():
-                for j, (k, v) in enumerate(initial_param.items()):
-                    setattr(self.learner.net, k, torch.nn.Parameter(v - (self.inner_lr * inner_grads[i][j])))
+                for j, (k, v) in enumerate(initial_param):
+                    tree = k.split(".")
+                    prev = []
+                    attr = self.learner
+                    for t in tree:
+                        for p in prev:
+                            attr = getattr(attr, p)
+                        prev.append(t)
+                    setattr(attr, tree[-1], torch.nn.Parameter(v - (self.inner_lr * inner_grads[i][j])))
             # TODO: vectorize this loop if possible
             for x, y in m_test:
                 '''For each task in m_test'''
                 # self.inner_optim.zero_grad()
-                y_pred = self.learner(x)
+                y_pred = self.learner(x.unsqueeze(dim=0))[0]
                 # Accumulate the loss over all tasks in the meta-testing set
                 meta_loss += self.meta_loss(y_pred, y)
+                passes += 1
                 # self.learner.zero_grad()
                 # loss = self.meta_loss(y_pred, y)
                 # loss.backward()
@@ -94,15 +106,19 @@ class MAML(torch.nn.Module):
   #                   setattr(self.learner.net, k, torch.nn.Parameter(v))
 
         # Step 3. Now that the meta-loss is computed
-        print(f"Meta-testing Cummulative Loss={meta_loss}")
+        avg_loss = meta_loss / passes
+        print(f"Meta-testing Average Loss={avg_loss}")
         # For now, let's try a manual parameter update
-        meta_gradient = torch.autograd.grad(meta_loss,
-                self.learner.parameters())
-        assert None not in meta_gradient, "Empty meta-gradient!"
-        for j, (k, v) in enumerate(initial_param.items()):
-            setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * meta_gradient[j])))
-        # meta_loss.backward()
-        # self.inner_optim.step()
+  #       meta_gradient = torch.autograd.grad(meta_loss,
+  #               self.learner.parameters())
+        # assert None not in meta_gradient, "Empty meta-gradient!"
+#         with torch.no_grad():
+            # for j, param in enumerate(self.learner.parameters()):
+#                 param -= self.meta_lr * meta_gradient[j]
+#         for j, (k, v) in enumerate(initial_param.items()):
+#             setattr(self.learner.net, k, torch.nn.Parameter(v - (self.meta_lr * meta_gradient[j])))
+        meta_loss.backward()
+        self.inner_optim.step()
         # TODO: What the heck do we return?
 
     def fit(self, dataset: List[tuple], iterations: int):
@@ -110,7 +126,7 @@ class MAML(torch.nn.Module):
         # Sample a batch of tasks
         for i in range(iterations):
             random.shuffle(dataset)
-            batch = dataset[:8]
+            batch = dataset[:4]
             self.forward(batch)
         # TODO: Meta-testing here?
         # TODO: Computation of the meta-objective here?

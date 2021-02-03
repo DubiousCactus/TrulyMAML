@@ -26,7 +26,7 @@ from PIL import Image
 
 
 class SineWaveDataset(torch.utils.data.Dataset):
-    def __init__(self, samples=1000):
+    def __init__(self, samples=5000):
         x = torch.linspace(-5.0, 5.0, samples)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         y = magnitude * torch.sin(x + phase)
@@ -122,7 +122,7 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 
 
 def main():
-    train(prepare_sinewave(100))
+    train(prepare_sinewave(50))
     # conventional_train(prepare_sinewave(10))
 
 
