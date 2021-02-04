@@ -30,7 +30,7 @@ device = "cpu"
 
 
 class SineWaveDataset(torch.utils.data.Dataset):
-    def __init__(self, samples=5000):
+    def __init__(self, samples=500):
         x = torch.linspace(-5.0, 5.0, samples, device=device)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         # phase, magnitude = 0, 1
@@ -54,12 +54,12 @@ class SineWaveDataset(torch.utils.data.Dataset):
 def train(dataset, learner):
     print("[*] Training...")
     # Make the training / eval splits
-    t_size = int(0.7*len(dataset))
+    t_size = int(0.8*len(dataset))
     train, test = dataset[:t_size], dataset[t_size:]
 
     model = MAML(learner)
     model.to(device)
-    model.fit(train, 150)
+    model.fit(train, 50000)
     model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
    #  criterion = torch.nn.MSELoss(reduction='sum')
@@ -148,7 +148,7 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 def main():
     learner = MLP()
     learner.to(device)
-    train(prepare_sinewave(50), learner)
+    train(prepare_sinewave(10), learner)
     # conventional_train(prepare_sinewave(1), learner)
 
 

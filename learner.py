@@ -32,18 +32,19 @@ class DummiePolyLearner(nn.Module):
 class MLP(nn.Module):
     def __init__(self):
         super().__init__()
-#         self.net = nn.Sequential(
-                # nn.Linear(1, 40),
-                # nn.ReLU(),
-                # nn.Linear(40, 40),
-                # nn.ReLU(),
-                # nn.Linear(40, 1))
-        self.lin1 = nn.Linear(1, 40)
-        self.lin2 = nn.Linear(40, 40)
-        self.lin3 = nn.Linear(40, 1)
+        self.net = nn.Sequential(
+                nn.Linear(1, 40),
+                nn.ReLU(),
+                nn.Linear(40, 40),
+                nn.ReLU(),
+                nn.Linear(40, 1))
+        # self.lin1 = nn.Linear(1, 40)
+        # self.lin2 = nn.Linear(40, 40)
+        # self.lin3 = nn.Linear(40, 1)
 
 
     def forward(self, x):
-        x = self.lin1(x)
-        x = self.lin2(F.relu(x))
-        return self.lin3(F.relu(x))
+        return self.net(x)
+#         x = self.lin1(x)
+        # x = self.lin2(F.relu(x))
+#         return self.lin3(F.relu(x))
