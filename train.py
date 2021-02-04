@@ -33,6 +33,7 @@ class SineWaveDataset(torch.utils.data.Dataset):
     def __init__(self, samples=5000):
         x = torch.linspace(-5.0, 5.0, samples, device=device)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
+        # phase, magnitude = 0, 1
         self.sin = lambda x: magnitude * torch.sin(x + phase)
         y = self.sin(x).to(device)
         self.samples = torch.stack((x, y)).T.to(device)
@@ -134,7 +135,9 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
     print(f"[*] Generating {task_number} sinwaves of random phases and magnitudes...")
     tasks = []
     for n in tqdm(range(task_number)):
-        tasks.append(SineWaveDataset())
+        random_sine = SineWaveDataset()
+        random_sine.shuffle()
+        tasks.append(random_sine)
     # print("[*] Plotting the sinwave...")
     # fig, ax = plt.subplots()
     # ax.plot(x, y)
@@ -145,8 +148,8 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 def main():
     learner = MLP()
     learner.to(device)
-    # train(prepare_sinewave(50), learner)
-    conventional_train(prepare_sinewave(1), learner)
+    train(prepare_sinewave(50), learner)
+    # conventional_train(prepare_sinewave(1), learner)
 
 
 if __name__ == "__main__":
