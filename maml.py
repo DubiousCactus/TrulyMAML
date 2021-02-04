@@ -129,21 +129,22 @@ class MAML(torch.nn.Module):
 
 
     def forward2(self, tasks_batch):
-        # TODO: m_train should never intersect with m_test!
+        # m_train should never intersect with m_test! So only shuffle the task
+        # at creation!
         # For each task in the batch
         initial_param = dict(list(self.learner.named_parameters()))
         initial_param_raw = self.learner.parameters()
+        meta_loss = 0
         meta_losses = []
         passes = 0
         self.meta_opt.zero_grad()
-        for i, task in enumerate(tasks_batch):
-            # task.shuffle()
-            m_train, m_test = task[:self.K], task[self.K:]
-            indices = torch.randperm(len(m_train))
-            m_train = m_train[indices]
-            with higher.innerloop_ctx(
-                    self.learner, self.inner_opt, copy_initial_weights=False
-                    ) as (f_learner, diff_opt):
+        with higher.innerloop_ctx(
+                self.learner, self.inner_opt, copy_initial_weights=False
+                ) as (f_learner, diff_opt):
+            for i, task in enumerate(tasks_batch):
+                m_train, m_test = task[:self.K], task[self.K:]
+                indices = torch.randperm(len(m_train))
+                m_train = m_train[indices]
                 for s in range(self.inner_steps):
                     step_loss = 0
                     for x, y in m_train:
@@ -151,19 +152,18 @@ class MAML(torch.nn.Module):
                         step_loss += self.inner_loss(y_pred, y)
                     diff_opt.step(step_loss)
 
-                meta_loss = 0
                 for x, y in m_test:
                     y_pred = f_learner(x.unsqueeze(dim=0))[0] # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
                     meta_loss += self.meta_loss(y_pred, y)
                     passes += 1
 
-                meta_losses.append(meta_loss.detach())
+                # meta_losses.append(meta_loss.detach())
 
-                # Update the model's meta-parameters to optimize the query
-                # losses across all of the tasks sampled in this batch.
-                # This unrolls through the gradient steps.
-                meta_loss.backward()
+            # Update the model's meta-parameters to optimize the query
+            # losses across all of the tasks sampled in this batch.
+            # This unrolls through the gradient steps.
+            meta_loss.backward()
 
         self.meta_opt.step()
         avg_loss = sum(meta_losses) / passes
