@@ -20,35 +20,64 @@ import math
 from learner import DummiePolyLearner, MLP
 from maml import MAML
 
+from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset
+from pytictoc import TicToc
 from typing import List
 from tqdm import tqdm
 from PIL import Image
 
 
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = "cpu"
 
 
-class SineWaveDataset(torch.utils.data.Dataset):
-    def __init__(self, samples=500):
-        x = torch.linspace(-5.0, 5.0, samples, device=device)
+class SineWaveDataset(Dataset):
+    def __init__(self, samples=20):
+        self.x = torch.linspace(-5.0, 5.0, samples)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         # phase, magnitude = 0, 1
         self.sin = lambda x: magnitude * torch.sin(x + phase)
-        y = self.sin(x).to(device)
-        self.samples = torch.stack((x, y)).T.to(device)
+        self.y = self.sin(self.x)
+        # self.samples = torch.stack((x, y)).T.to(device)
 
     def shuffle(self):
-        self.samples = self.samples[torch.randperm(self.samples.size()[0]),:]
+        indices = torch.randperm(self.x.size()[0])
+        self.x = self.x[indices]
+        self.y = self.y[indices]
+
+
+    def pin_memory(self):
+        self.x = self.x.pin_memory()
+        self.y = self.y.pin_memory()
+        return self
 
     def __len__(self):
-        return len(self.samples)
-
+        return len(self.x)
 
     def __getitem__(self, idx):
-        assert self.sin(self.samples[idx][0][0]) == self.samples[idx][0][1], "Sample pairs are wrong!"
-        return self.samples[idx]
+        # assert self.sin(self.x[idx]) == self.y[idx], "Sample pairs are wrong!"
+        return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
+
+class SineWaveTasksDataset(Dataset):
+    def __init__(self, tasks, sampled_per_task):
+        tasks = []
+        for n in range(tasks):
+            x = torch.linspace(-5.0, 5.0, samples, device=device)
+            phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
+            y = magnitude * torch.sin(x + phase).to(device)
+            samples = torch.stack((x, y)).T.to(device)
+            tasks.append(samples)
+        self.tasks = TensorDataset(tasks)
+
+    def suffle(self):
+        self.tasks = self.tasks[torch.randperm(self.tasks.size()[0]),:]
+
+    def __len__(self):
+        return len(self.tasks)
+
+    def __getitem__(self, idx):
+        return self.tasks[idx]
 
 
 def train(dataset, learner):
@@ -78,36 +107,36 @@ def train(dataset, learner):
     print("[*] Done!")
 
 
-def conventional_train(dataset, learner):
+def conventional_train(train_dataset, eval_dataset, learner):
     print("[*] Training with a conventional optimizer...")
     # Make the training / eval splits
-    task = dataset[0]
-    batch_size = 10
-    t_size = int(0.7*len(task))
-    task.shuffle()
-    train, test = task[:t_size], task[t_size:]
     model = learner
     optimizer = torch.optim.Adam(model.parameters())
     criterion = torch.nn.MSELoss(reduction='sum')
     print("[*] Evaluating with random initialization...")
     total_loss = 0
-    for x, y in test:
-        y_pred = model(x.unsqueeze(dim=0))[0]
-        loss = criterion(y_pred, y)
+    for i, (x, y) in enumerate(eval_dataset):
+        y_pred = model(x.to(device))
+        loss = criterion(y_pred, y.to(device))
+        print(f"-> Batch {i}: {loss}")
         total_loss += loss
-    avg_loss = total_loss.item() / len(test)
+    avg_loss = total_loss.item() / len(eval_dataset)
 
     print(f"[*] Average evaluation loss: {avg_loss}")
+
+    t = TicToc()
+    model.train()
+    t.tic()
     for i in range(2000):
-        indices = torch.randperm(len(train))[:batch_size]
-        batch = train[indices]
         loss = 0
         optimizer.zero_grad()
-        for x, y in batch:
-            y_pred = model(x.unsqueeze(dim=0))[0]
-            loss += criterion(y_pred, y)
+        for x, y in train_dataset:
+            y_pred = model(x.to(device))
+            loss += criterion(y_pred, y.to(device))
         if i % 100 == 99:
-            print(i, loss.item()/batch_size)
+            print(i, loss.item()/len(train_dataset))
+            t.toc()
+            t.tic()
         loss.backward()
         optimizer.step()
 
@@ -115,29 +144,30 @@ def conventional_train(dataset, learner):
     model.eval()
     total_loss = 0
     with torch.no_grad():
-        for x, y in test:
-            y_pred = model(x.unsqueeze(dim=0))[0]
-            loss = criterion(y_pred, y)
+        for i, (x, y) in enumerate(eval_dataset):
+            y_pred = model(x.to(device))
+            loss = criterion(y_pred, y.to(device))
             total_loss += loss
-    avg_loss = total_loss.item() / len(test)
+    avg_loss = total_loss.item() / len(eval_dataset)
     print(f"[*] Average evaluation loss: {avg_loss}")
 
 def prepare_omniglot():
     print("[*] Loading Omniglot...")
     omniglot = torchvision.datasets.Omniglot(root='./datasets/',
             download=True)
-    omniglot_loader = torch.utils.data.DataLoader(omniglot, batch_size=4,
+    omniglot_loader = DataLoader(omniglot, batch_size=4,
             shuffle=True, num_workers=6)
     return omniglot
 
 
-def prepare_sinewave(task_number: int) -> List[torch.tensor]:
+def prepare_sinewave(task_number: int) -> ConcatDataset:
     print(f"[*] Generating {task_number} sinwaves of random phases and magnitudes...")
     tasks = []
     for n in tqdm(range(task_number)):
         random_sine = SineWaveDataset()
-        random_sine.shuffle()
+        # random_sine.shuffle()
         tasks.append(random_sine)
+    tasks = ConcatDataset(tasks)
     # print("[*] Plotting the sinwave...")
     # fig, ax = plt.subplots()
     # ax.plot(x, y)
@@ -146,10 +176,19 @@ def prepare_sinewave(task_number: int) -> List[torch.tensor]:
 
 
 def main():
-    learner = MLP()
+    learner = MLP(device)
     learner.to(device)
-    train(prepare_sinewave(10), learner)
-    # conventional_train(prepare_sinewave(1), learner)
+    dataset = prepare_sinewave(100)
+    # dataset = SineWaveDataset()
+    train_dataloader = DataLoader(
+            dataset,
+            batch_size=32,
+            shuffle=True, pin_memory=True)
+    dataset = prepare_sinewave(1)
+    eval_dataloader = DataLoader(
+            dataset,
+            batch_size=16, pin_memory=True)
+    conventional_train(train_dataloader, eval_dataloader, learner)
 
 
 if __name__ == "__main__":

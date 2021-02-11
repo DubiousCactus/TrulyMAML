@@ -140,7 +140,7 @@ class MAML(torch.nn.Module):
                     self.learner, self.inner_opt, copy_initial_weights=False
                     ) as (f_learner, diff_opt):
                 meta_loss = 0
-                m_train, m_test = task[:self.K], task[self.K:][:25]
+                m_train, m_test = task[:self.K], task[self.K:]
                 indices = torch.randperm(len(m_train))
                 m_train = m_train[indices]
                 # indices = torch.randperm(len(m_test))[:50]
@@ -170,7 +170,7 @@ class MAML(torch.nn.Module):
 
 
     def fit(self, dataset: List[tuple], iterations: int):
-        device = "cpu"
+        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
         class SineWaveDataset(torch.utils.data.Dataset):
             def __init__(self, samples=500):
                 x = torch.linspace(-5.0, 5.0, samples, device=device)
@@ -197,13 +197,14 @@ class MAML(torch.nn.Module):
         # Sample a batch of tasks
         self.learner.train()
         for i in range(iterations):
-            batch = []
-            for j in range(25):
-                sine = SineWaveDataset()
-                sine.shuffle()
-                batch.append(sine)
+            random.shuffle(dataset)
+            batch = dataset[:25]
+            # for j in range(25):
+                # sine = SineWaveDataset()
+                # sine.shuffle()
+                # batch.append(sine)
             loss = self.forward2(batch)
-            if i% 100 == 0:
+            if i % 10 == 0:
                 print(f"[{i}] Meta-testing Average Loss={loss}")
         # TODO: Meta-testing here?
         # TODO: Computation of the meta-objective here?
