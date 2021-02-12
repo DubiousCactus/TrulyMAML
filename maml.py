@@ -132,7 +132,6 @@ class MAML(torch.nn.Module):
         # m_train should never intersect with m_test! So only shuffle the task
         # at creation!
         # For each task in the batch
-        # TODO: Batch inference
         meta_losses = []
         self.meta_opt.zero_grad()
         for i, task in enumerate(tasks_batch):
@@ -140,22 +139,19 @@ class MAML(torch.nn.Module):
                     self.learner, self.inner_opt, copy_initial_weights=False
                     ) as (f_learner, diff_opt):
                 meta_loss = 0
-                m_train, m_test = task[:self.K], task[self.K:]
-                indices = torch.randperm(len(m_train))
-                m_train = m_train[indices]
-                # indices = torch.randperm(len(m_test))[:50]
-                # m_test = m_test[indices]
+                m_train, m_test = task[0], task[1]
                 for s in range(self.inner_steps):
                     step_loss = 0
                     for x, y in m_train:
-                        y_pred = f_learner(x.unsqueeze(dim=0))[0]
+                        # m_train is an iterator returning batches
+                        y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
                     diff_opt.step(step_loss)
 
                 for x, y in m_test:
-                    y_pred = f_learner(x.unsqueeze(dim=0))[0] # Use the updated model for that task
+                    y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
-                    meta_loss += self.meta_loss(y_pred, y)
+                    meta_loss += self.meta_loss(y_pred, y) / len(m_test)
 
                 meta_losses.append(meta_loss.detach())
 
@@ -169,41 +165,11 @@ class MAML(torch.nn.Module):
         return avg_loss
 
 
-    def fit(self, dataset: List[tuple], iterations: int):
-        device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-        class SineWaveDataset(torch.utils.data.Dataset):
-            def __init__(self, samples=500):
-                x = torch.linspace(-5.0, 5.0, samples, device=device)
-                phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
-                # phase, magnitude = 0, 1
-                self.sin = lambda x: magnitude * torch.sin(x + phase)
-                y = self.sin(x).to(device)
-                self.samples = torch.stack((x, y)).T.to(device)
-
-            def shuffle(self):
-                self.samples = self.samples[torch.randperm(self.samples.size()[0]),:]
-
-            def __len__(self):
-                return len(self.samples)
-
-
-            def __getitem__(self, idx):
-                assert self.sin(self.samples[idx][0][0]) == self.samples[idx][0][1], "Sample pairs are wrong!"
-                return self.samples[idx]
-
-
-
-        # t = np.random.choice(dataset)
-        # Sample a batch of tasks
+    def fit(self, dataset, tasks_per_iter: int, iterations: int):
         self.learner.train()
         for i in range(iterations):
             random.shuffle(dataset)
-            batch = dataset[:25]
-            # for j in range(25):
-                # sine = SineWaveDataset()
-                # sine.shuffle()
-                # batch.append(sine)
-            loss = self.forward2(batch)
+            loss = self.forward2(dataset[:tasks_per_iter])
             if i % 10 == 0:
                 print(f"[{i}] Meta-testing Average Loss={loss}")
         # TODO: Meta-testing here?

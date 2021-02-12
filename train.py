@@ -22,7 +22,7 @@ from maml import MAML
 
 from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset
 from pytictoc import TicToc
-from typing import List
+from typing import List, Tuple
 from tqdm import tqdm
 from PIL import Image
 
@@ -80,16 +80,12 @@ class SineWaveTasksDataset(Dataset):
         return self.tasks[idx]
 
 
-def train(dataset, learner):
+def train(training_dataset, learner):
     print("[*] Training...")
-    # Make the training / eval splits
-    t_size = int(0.8*len(dataset))
-    train, test = dataset[:t_size], dataset[t_size:]
-
     model = MAML(learner)
     model.to(device)
-    model.fit(train, 50000)
-    model.eval(test)
+    model.fit(training_dataset, 25, 50000)
+    # model.eval(test)
     # TODO: Maybe implement MAML's training within MAML itself
    #  criterion = torch.nn.MSELoss(reduction='sum')
     # optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
@@ -124,9 +120,9 @@ def conventional_train(train_dataset, eval_dataset, learner):
 
     print(f"[*] Average evaluation loss: {avg_loss}")
 
-    t = TicToc()
+    # t = TicToc()
     model.train()
-    t.tic()
+    # t.tic()
     for i in range(2000):
         loss = 0
         optimizer.zero_grad()
@@ -135,8 +131,8 @@ def conventional_train(train_dataset, eval_dataset, learner):
             loss += criterion(y_pred, y.to(device))
         if i % 100 == 99:
             print(i, loss.item()/len(train_dataset))
-            t.toc()
-            t.tic()
+            # t.toc()
+            # t.tic()
         loss.backward()
         optimizer.step()
 
@@ -160,35 +156,40 @@ def prepare_omniglot():
     return omniglot
 
 
-def prepare_sinewave(task_number: int) -> ConcatDataset:
-    print(f"[*] Generating {task_number} sinwaves of random phases and magnitudes...")
+def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> List[Tuple[DataLoader]]:
+    print(f"[*] Generating {tasks_num} sinwaves of random phases and magnitudes...")
     tasks = []
-    for n in tqdm(range(task_number)):
-        random_sine = SineWaveDataset()
-        # random_sine.shuffle()
-        tasks.append(random_sine)
-    tasks = ConcatDataset(tasks)
-    # print("[*] Plotting the sinwave...")
-    # fig, ax = plt.subplots()
-    # ax.plot(x, y)
-    # plt.show()
+    for n in tqdm(range(tasks_num)):
+        sine_wave = SineWaveDataset(samples=samples_per_task)
+        sine_wave.shuffle()
+        meta_train_loader = DataLoader(
+                TensorDataset(sine_wave[:K]),
+                batch_size=16,
+                shuffle=True, # Shuffle at each epoch
+                pin_memory=True)
+        meta_test_loader = DataLoader(
+                TensorDataset(sine_wave[K:]),
+                batch_size=1,
+                shuffle=False,
+                pin_memory=True)
+        tasks.append((meta_train_loader, meta_test_loader))
     return tasks
 
 
 def main():
     learner = MLP(device)
     learner.to(device)
-    dataset = prepare_sinewave(100)
-    # dataset = SineWaveDataset()
-    train_dataloader = DataLoader(
-            dataset,
-            batch_size=32,
-            shuffle=True, pin_memory=True)
-    dataset = prepare_sinewave(1)
-    eval_dataloader = DataLoader(
-            dataset,
-            batch_size=16, pin_memory=True)
-    conventional_train(train_dataloader, eval_dataloader, learner)
+    dataset = prepare_sinewave_dataset(100, 25, 10)
+    train(dataset, learner)
+    # train_dataloader = DataLoader(
+            # dataset,
+            # batch_size=32,
+            # shuffle=True, pin_memory=True)
+    # dataset = prepare_sinewave(1)
+    # eval_dataloader = DataLoader(
+            # dataset,
+            # batch_size=16, pin_memory=True)
+    # conventional_train(train_dataloader, eval_dataloader, learner)
 
 
 if __name__ == "__main__":
