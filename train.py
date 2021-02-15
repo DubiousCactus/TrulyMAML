@@ -20,7 +20,7 @@ import math
 from learner import DummiePolyLearner, MLP
 from maml import MAML
 
-from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset
+from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset, SubsetRandomSampler
 from pytictoc import TicToc
 from typing import List, Tuple
 from tqdm import tqdm
@@ -33,11 +33,11 @@ device = "cpu"
 
 class SineWaveDataset(Dataset):
     def __init__(self, samples=20):
-        self.x = torch.linspace(-5.0, 5.0, samples)
+        self.x = torch.linspace(-5.0, 5.0, samples, device=device)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         # phase, magnitude = 0, 1
         self.sin = lambda x: magnitude * torch.sin(x + phase)
-        self.y = self.sin(self.x)
+        self.y = self.sin(self.x).to(device)
         # self.samples = torch.stack((x, y)).T.to(device)
 
     def shuffle(self):
@@ -59,56 +59,22 @@ class SineWaveDataset(Dataset):
         return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
 
-class SineWaveTasksDataset(Dataset):
-    def __init__(self, tasks, sampled_per_task):
-        tasks = []
-        for n in range(tasks):
-            x = torch.linspace(-5.0, 5.0, samples, device=device)
-            phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
-            y = magnitude * torch.sin(x + phase).to(device)
-            samples = torch.stack((x, y)).T.to(device)
-            tasks.append(samples)
-        self.tasks = TensorDataset(tasks)
-
-    def suffle(self):
-        self.tasks = self.tasks[torch.randperm(self.tasks.size()[0]),:]
-
-    def __len__(self):
-        return len(self.tasks)
-
-    def __getitem__(self, idx):
-        return self.tasks[idx]
-
-
 def train(training_dataset, learner):
     print("[*] Training...")
     model = MAML(learner)
     model.to(device)
     model.fit(training_dataset, 25, 50000)
     # model.eval(test)
-    # TODO: Maybe implement MAML's training within MAML itself
-   #  criterion = torch.nn.MSELoss(reduction='sum')
-    # optimizer = torch.optim.SGD(model.parameters(), lr=1e-6)
-    # # Training loop
-    # for t in range(2000):
-        # # TODO: Sample a batch of tasks (how many??)
-        # optimizer.zero_grad()
-        # y_pred = model(x) # x should be the batch of tasks
-        # loss = criterion(y_pred, y)
-        # if t % 100 == 99:
-            # print(t, loss.item())
-
-        # loss.backward()
-        # optimizer.step()
     print("[*] Done!")
 
 
-def conventional_train(train_dataset, eval_dataset, learner):
+def conventional_train(dataset, learner):
     print("[*] Training with a conventional optimizer...")
     # Make the training / eval splits
     model = learner
     optimizer = torch.optim.Adam(model.parameters())
     criterion = torch.nn.MSELoss(reduction='sum')
+    train_dataset, eval_dataset = dataset[0][0], dataset[0][1]
     print("[*] Evaluating with random initialization...")
     total_loss = 0
     for i, (x, y) in enumerate(eval_dataset):
@@ -120,19 +86,19 @@ def conventional_train(train_dataset, eval_dataset, learner):
 
     print(f"[*] Average evaluation loss: {avg_loss}")
 
-    # t = TicToc()
+    t = TicToc()
     model.train()
-    # t.tic()
+    t.tic()
     for i in range(2000):
         loss = 0
         optimizer.zero_grad()
         for x, y in train_dataset:
-            y_pred = model(x.to(device))
-            loss += criterion(y_pred, y.to(device))
+            y_pred = model(x)
+            loss += criterion(y_pred, y)
         if i % 100 == 99:
             print(i, loss.item()/len(train_dataset))
-            # t.toc()
-            # t.tic()
+            t.toc()
+            t.tic()
         loss.backward()
         optimizer.step()
 
@@ -163,15 +129,17 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
         sine_wave = SineWaveDataset(samples=samples_per_task)
         sine_wave.shuffle()
         meta_train_loader = DataLoader(
-                TensorDataset(sine_wave[:K]),
-                batch_size=16,
-                shuffle=True, # Shuffle at each epoch
-                pin_memory=True)
+                sine_wave,
+                batch_size=10,
+                # num_workers=8,
+                sampler=SubsetRandomSampler(range(K)),
+                pin_memory=False)
         meta_test_loader = DataLoader(
-                TensorDataset(sine_wave[K:]),
+                sine_wave,
                 batch_size=1,
-                shuffle=False,
-                pin_memory=True)
+                # num_workers=8,
+                sampler=SubsetRandomSampler(range(K, len(sine_wave))),
+                pin_memory=False)
         tasks.append((meta_train_loader, meta_test_loader))
     return tasks
 
@@ -179,17 +147,9 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
 def main():
     learner = MLP(device)
     learner.to(device)
-    dataset = prepare_sinewave_dataset(100, 25, 10)
+    dataset = prepare_sinewave_dataset(500, 20, 10)
     train(dataset, learner)
-    # train_dataloader = DataLoader(
-            # dataset,
-            # batch_size=32,
-            # shuffle=True, pin_memory=True)
-    # dataset = prepare_sinewave(1)
-    # eval_dataloader = DataLoader(
-            # dataset,
-            # batch_size=16, pin_memory=True)
-    # conventional_train(train_dataloader, eval_dataloader, learner)
+    # conventional_train(dataset, learner)
 
 
 if __name__ == "__main__":

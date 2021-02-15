@@ -16,8 +16,12 @@ import higher
 import torch
 import math
 
+from pytictoc import TicToc
 from typing import List
 
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
@@ -128,12 +132,14 @@ class MAML(torch.nn.Module):
         # TODO: What the heck do we return?
 
 
-    def forward2(self, tasks_batch):
+    def forward2(self, tasks_batch, return_loss=False):
         # m_train should never intersect with m_test! So only shuffle the task
         # at creation!
         # For each task in the batch
         meta_losses = []
         self.meta_opt.zero_grad()
+        # t = TicToc()
+        # t.tic()
         for i, task in enumerate(tasks_batch):
             with higher.innerloop_ctx(
                     self.learner, self.inner_opt, copy_initial_weights=False
@@ -144,16 +150,17 @@ class MAML(torch.nn.Module):
                     step_loss = 0
                     for x, y in m_train:
                         # m_train is an iterator returning batches
-                        y_pred = f_learner(x)
+                        y_pred = f_learner(x.to(device))
                         step_loss += self.inner_loss(y_pred, y)
                     diff_opt.step(step_loss)
 
                 for x, y in m_test:
-                    y_pred = f_learner(x) # Use the updated model for that task
+                    y_pred = f_learner(x.to(device)) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
                     meta_loss += self.meta_loss(y_pred, y) / len(m_test)
 
-                meta_losses.append(meta_loss.detach())
+                if return_loss:
+                    meta_losses.append(meta_loss.detach())
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
@@ -161,17 +168,22 @@ class MAML(torch.nn.Module):
                 meta_loss.backward()
 
         self.meta_opt.step()
-        avg_loss = sum(meta_losses) / len(tasks_batch)
+        avg_loss = sum(meta_losses) / len(tasks_batch) if return_loss else 0
+        # t.toc()
         return avg_loss
 
 
     def fit(self, dataset, tasks_per_iter: int, iterations: int):
         self.learner.train()
+        # t = TicToc()
+        # t.tic()
         for i in range(iterations):
             random.shuffle(dataset)
-            loss = self.forward2(dataset[:tasks_per_iter])
-            if i % 10 == 0:
+            loss = self.forward2(dataset[:tasks_per_iter], i%1000 == 0)
+            if i % 1000 == 0:
                 print(f"[{i}] Meta-testing Average Loss={loss}")
+                # t.toc()
+                # t.tic()
         # TODO: Meta-testing here?
         # TODO: Computation of the meta-objective here?
         # TODO: Meta-optimization here?
