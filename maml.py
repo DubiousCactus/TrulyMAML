@@ -10,6 +10,8 @@
 MAML module
 """
 
+import torch.multiprocessing as mp
+import torch.nn.functional as F
 import numpy as np
 import random
 import higher
@@ -150,12 +152,12 @@ class MAML(torch.nn.Module):
                     step_loss = 0
                     for x, y in m_train:
                         # m_train is an iterator returning batches
-                        y_pred = f_learner(x.to(device))
+                        y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
                     diff_opt.step(step_loss)
 
                 for x, y in m_test:
-                    y_pred = f_learner(x.to(device)) # Use the updated model for that task
+                    y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
                     meta_loss += self.meta_loss(y_pred, y) / len(m_test)
 
@@ -172,6 +174,53 @@ class MAML(torch.nn.Module):
         # t.toc()
         return avg_loss
 
+    def forward_mp(self, tasks_batch, return_loss=False):
+        # m_train should never intersect with m_test! So only shuffle the task
+        # at creation!
+        # For each task in the batch
+        self.learner.share_memory()
+        def forward_on_task(rank, task, return_dict):
+            meta_loss = 0
+            self.meta_opt.zero_grad()
+            with higher.innerloop_ctx(
+                    self.learner, self.inner_opt, copy_initial_weights=False
+                    ) as (f_learner, diff_opt):
+                m_train, m_test = task[0], task[1]
+                for s in range(self.inner_steps):
+                    step_loss = 0
+                    for x, y in m_train:
+                        # m_train is an iterator returning batches
+                        y_pred = f_learner(x)
+                        step_loss += F.mse_loss(y_pred, y)
+                    diff_opt.step(step_loss)
+
+                for x, y in m_test:
+                    y_pred = f_learner(x) # Use the updated model for that task
+                    # Accumulate the loss over all tasks in the meta-testing set
+                    meta_loss += F.mse_loss(y_pred, y) / len(m_test)
+            return_dict[rank] = meta_loss
+
+        processes = []
+        manager = mp.Manager()
+        return_dict = manager.dict()
+        for rank in range(len(tasks_batch)):
+            p = mp.Process(target=forward_on_task,
+                    args=(rank, tasks_batch[rank], return_dict))
+            # We first train the model across `num_processes` processes
+            p.start()
+            processes.append(p)
+        for p in processes:
+            p.join()
+        # Update the model's meta-parameters to optimize the query
+        # losses across all of the tasks sampled in this batch.
+        # This unrolls through the gradient steps.
+        assert return_dict, "Empty meta-loss list"
+        total_meta_loss = sum(return_dict.values())
+        total_meta_loss.backward()
+
+        self.meta_opt.step()
+        return total_meta_loss / len(tasks_batch) if return_loss else 0
+
 
     def fit(self, dataset, tasks_per_iter: int, iterations: int):
         self.learner.train()
@@ -179,7 +228,8 @@ class MAML(torch.nn.Module):
         # t.tic()
         for i in range(iterations):
             random.shuffle(dataset)
-            loss = self.forward2(dataset[:tasks_per_iter], i%1000 == 0)
+            # loss = self.forward2(dataset[:tasks_per_iter], i%1000 == 0)
+            loss = self.forward_mp(dataset[:tasks_per_iter], i%1000 == 0)
             if i % 1000 == 0:
                 print(f"[{i}] Meta-testing Average Loss={loss}")
                 # t.toc()

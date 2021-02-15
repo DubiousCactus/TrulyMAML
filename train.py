@@ -63,7 +63,7 @@ def train(training_dataset, learner):
     print("[*] Training...")
     model = MAML(learner)
     model.to(device)
-    model.fit(training_dataset, 25, 50000)
+    model.fit(training_dataset, 1, 50000)
     # model.eval(test)
     print("[*] Done!")
 
