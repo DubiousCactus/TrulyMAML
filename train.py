@@ -31,13 +31,22 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = "cpu"
 
 
+# TODO:
+# [ ] Save model state
+# [ ] Restore model state
+# [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
+# [ ] Implement OmniGlot classification
+# [ ] Implement meta-testing (model evaluation)
+# [ ] Try to vectorize the batch of tasks for faster training
+
+
 class SineWaveDataset(Dataset):
     def __init__(self, samples=20):
         self.x = torch.linspace(-5.0, 5.0, samples, device=device)
         phase, magnitude = np.random.uniform(0, math.pi), np.random.uniform(0.1, 5.0)
         # phase, magnitude = 0, 1
-        self.sin = lambda x: magnitude * torch.sin(x + phase)
-        self.y = self.sin(self.x).to(device)
+        # self.sin = lambda x: magnitude * torch.sin(x + phase)
+        self.y = magnitude * torch.sin(self.x + phase).to(device)
         # self.samples = torch.stack((x, y)).T.to(device)
 
     def shuffle(self):
@@ -59,12 +68,17 @@ class SineWaveDataset(Dataset):
         return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
 
-def train(training_dataset, learner):
+def train_with_maml(dataset, learner):
     print("[*] Training...")
     model = MAML(learner)
     model.to(device)
-    model.fit(training_dataset, 1, 50000)
-    # model.eval(test)
+    model.fit(dataset, 32, 50000)
+    print("[*] Done!")
+    return model
+
+def test_with_maml(dataset, model):
+    print("[*] Testing...")
+    model.eval(dataset)
     print("[*] Done!")
 
 
@@ -123,11 +137,11 @@ def prepare_omniglot():
 
 
 def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> List[Tuple[DataLoader]]:
-    print(f"[*] Generating {tasks_num} sinwaves of random phases and magnitudes...")
+    print(f"[*] Generating {tasks_num} sinewaves of random phases and magnitudes...")
     tasks = []
     for n in tqdm(range(tasks_num)):
         sine_wave = SineWaveDataset(samples=samples_per_task)
-        sine_wave.shuffle()
+        # sine_wave.shuffle()
         meta_train_loader = DataLoader(
                 sine_wave,
                 batch_size=10,
@@ -136,7 +150,7 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
                 pin_memory=False)
         meta_test_loader = DataLoader(
                 sine_wave,
-                batch_size=1,
+                batch_size=10,
                 # num_workers=8,
                 sampler=SubsetRandomSampler(range(K, len(sine_wave))),
                 pin_memory=False)
@@ -147,9 +161,11 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
 def main():
     learner = MLP(device)
     learner.to(device)
-    dataset = prepare_sinewave_dataset(500, 20, 10)
-    train(dataset, learner)
+    train_dataset = prepare_sinewave_dataset(1000, 20, 10)
     # conventional_train(dataset, learner)
+    maml_model = train_with_maml(train_dataset, learner)
+    test_dataset = prepare_sinewave_dataset(50, 20, 10)
+    test(test_dataset, maml_model)
 
 
 if __name__ == "__main__":
