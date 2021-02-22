@@ -73,7 +73,7 @@ class MAML(torch.nn.Module):
         # m_train should never intersect with m_test! So only shuffle the task
         # at creation!
         # For each task in the batch
-        meta_losses = []
+        inner_losses, meta_losses = [], []
         self.meta_opt.zero_grad()
         # t = TicToc()
         # t.tic()
@@ -81,7 +81,7 @@ class MAML(torch.nn.Module):
             with higher.innerloop_ctx(
                     self.learner, self.inner_opt, copy_initial_weights=False
                     ) as (f_learner, diff_opt):
-                meta_loss = 0
+                meta_loss, inner_loss = 0, 0
                 m_train, m_test = task[0], task[1]
                 for s in range(self.inner_steps):
                     step_loss = 0
@@ -90,6 +90,7 @@ class MAML(torch.nn.Module):
                         y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
                     diff_opt.step(step_loss)
+                    inner_loss += step_loss.detach()
 
                 for x, y in m_test:
                     y_pred = f_learner(x) # Use the updated model for that task
@@ -98,6 +99,7 @@ class MAML(torch.nn.Module):
 
                 if return_loss:
                     meta_losses.append(meta_loss.detach()/len(m_test))
+                    inner_losses.append(inner_loss/len(m_train))
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
@@ -105,9 +107,10 @@ class MAML(torch.nn.Module):
                 meta_loss.backward()
 
         self.meta_opt.step()
-        avg_loss = sum(meta_losses) / len(tasks_batch) if return_loss else 0
+        avg_inner_loss = sum(inner_losses) / len(tasks_batch) if return_loss else 0
+        avg_meta_loss = sum(meta_losses) / len(tasks_batch) if return_loss else 0
         # t.toc()
-        return avg_loss
+        return avg_inner_loss, avg_meta_loss
 
     def forward_mp(self, tasks_batch, return_loss=False):
         # m_train should never intersect with m_test! So only shuffle the task
@@ -149,9 +152,9 @@ class MAML(torch.nn.Module):
         # t.tic()
         for i in range(iterations):
             random.shuffle(dataset)
-            loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             if i % 1000 == 0:
-                print(f"[{i}] Meta-testing Average Loss={loss}")
+                print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
                 # t.toc()
                 # t.tic()
 
