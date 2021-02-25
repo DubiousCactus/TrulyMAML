@@ -55,7 +55,7 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-3, inner_lr=1e-3, K=10, steps=5):
+            meta_lr=1e-3, inner_lr=1e-3, K=10, steps=1):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
@@ -147,7 +147,8 @@ class MAML(torch.nn.Module):
         return total_meta_loss / len(tasks_batch) if return_loss else 0
 
 
-    def fit(self, dataset, tasks_per_iter: int, iterations: int, save_path: str):
+    def fit(self, dataset, tasks_per_iter: int, iterations: int,
+            save_path: str, epoch: int):
         self.learner.train()
         # t = TicToc()
         # t.tic()
@@ -155,16 +156,29 @@ class MAML(torch.nn.Module):
             os.makedirs(save_path)
         except Exception:
             pass
-        for i in range(iterations):
+        for i in range(epoch, iterations):
             random.shuffle(dataset)
-            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%100 == 0)
-            if i % 100 == 0:
+            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+            if i % 1000 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
-                torch.save(self.learner.state_dict(), os.path.join(save_path,
-                    f"epoch_{i}_loss-{meta_loss}"))
+                torch.save({
+                    'epoch': i,
+                    'model_state_dict': self.learner.state_dict(),
+                    'inner_opt_state_dict': self.inner_opt.state_dict(),
+                    'meta_opt_state_dict': self.meta_opt.state_dict(),
+                    'inner_loss': self.inner_loss,
+                    'meta_loss': self.meta_loss
+                    }, os.path.join(save_path, f"epoch_{i}_loss-{meta_loss}.tar"))
                 # t.toc()
                 # t.tic()
 
     def eval(self, dataset: List[tuple]):
         self.learner.eval()
 
+
+    def restore(self, checkpoint):
+        self.learner.load_state_dict(checkpoint['model_state_dict'])
+        self.inner_opt.load_state_dict(checkpoint['inner_opt_state_dict'])
+        self.meta_opt.load_state_dict(checkpoint['meta_opt_state_dict'])
+        self.meta_loss = checkpoint['meta_loss']
+        self.inner_loss = checkpoint['inner_loss']

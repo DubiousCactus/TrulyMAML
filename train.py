@@ -13,9 +13,11 @@
 import matplotlib.pyplot as plt
 import numpy as np
 import torchvision
+import argparse
 import random
 import torch
 import math
+import os
 
 from learner import DummiePolyLearner, MLP
 from maml import MAML
@@ -33,7 +35,7 @@ device = "cpu"
 
 # TODO:
 # [x] Save model state
-# [ ] Restore model state
+# [x] Restore model state
 # [ ] Implement meta-testing (model evaluation)
 # [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
 # [ ] Implement OmniGlot classification
@@ -68,11 +70,15 @@ class SineWaveDataset(Dataset):
         return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
 
-def train_with_maml(dataset, learner, save_path):
+def train_with_maml(dataset, learner, save_path, checkpoint=None):
     print("[*] Training...")
     model = MAML(learner)
     model.to(device)
-    model.fit(dataset, 25, 70000, save_path)
+    epoch = 0
+    if checkpoint:
+        model.restore(checkpoint)
+        epoch = checkpoint['epoch']
+    model.fit(dataset, 25, 70000, save_path, epoch)
     print("[*] Done!")
     return model
 
@@ -159,11 +165,22 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Model-Agnostic Meta-Learning")
+    parser.add_argument('checkpoint_path', type=str, help='''path to checkpoint
+            saving directory''')
+    parser.add_argument('--load', type=str, help='''path to model
+            checkpoint''')
+    args = parser.parse_args()
+
     learner = MLP(device)
+    checkpoint = None
+    if args.load:
+        checkpoint = torch.load(args.load)
     learner.to(device)
-    train_dataset = prepare_sinewave_dataset(1000, 20, 10)
+    train_dataset = prepare_sinewave_dataset(1000, 30, 10)
     # conventional_train(dataset, learner)
-    maml_model = train_with_maml(train_dataset, learner, "sine_regression_ckpt")
+    maml_model = train_with_maml(train_dataset, learner,
+            "sine_regression_ckpt", checkpoint)
     test_dataset = prepare_sinewave_dataset(50, 30, 10)
     test(test_dataset, maml_model)
 
