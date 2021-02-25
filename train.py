@@ -17,6 +17,7 @@ import argparse
 import random
 import torch
 import math
+import sys
 import os
 
 from learner import DummiePolyLearner, MLP
@@ -36,10 +37,10 @@ device = "cpu"
 # TODO:
 # [x] Save model state
 # [x] Restore model state
-# [ ] Implement meta-testing (model evaluation)
+# [x] Implement meta-testing (model evaluation)
+# [ ] Try to vectorize the batch of tasks for faster training
 # [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
 # [ ] Implement OmniGlot classification
-# [ ] Try to vectorize the batch of tasks for faster training
 
 
 class SineWaveDataset(Dataset):
@@ -78,12 +79,15 @@ def train_with_maml(dataset, learner, save_path, checkpoint=None):
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, 25, 70000, save_path, epoch)
+    model.fit(dataset, 32, 70000, save_path, epoch)
     print("[*] Done!")
     return model
 
-def test_with_maml(dataset, model):
+def test_with_maml(dataset, learner, checkpoint):
     print("[*] Testing...")
+    model = MAML(learner)
+    model.to(device)
+    model.restore(checkpoint)
     model.eval(dataset)
     print("[*] Done!")
 
@@ -147,7 +151,8 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
     tasks = []
     for n in tqdm(range(tasks_num)):
         sine_wave = SineWaveDataset(samples=samples_per_task)
-        # sine_wave.shuffle()
+        # sine_wave.shuffle() Shuffling induces terrible performance and slow
+        # converging for regression!
         meta_train_loader = DataLoader(
                 sine_wave,
                 batch_size=10,
@@ -166,10 +171,12 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
 
 def main():
     parser = argparse.ArgumentParser(description="Model-Agnostic Meta-Learning")
-    parser.add_argument('checkpoint_path', type=str, help='''path to checkpoint
-            saving directory''')
+    parser.add_argument('--checkpoint_path', type=str, help='''path to checkpoint
+            saving directory''', required='--eval' not in sys.argv)
     parser.add_argument('--load', type=str, help='''path to model
             checkpoint''')
+    parser.add_argument('--eval', action='store_true', help='''Evaluation
+    moed''')
     args = parser.parse_args()
 
     learner = MLP(device)
@@ -177,12 +184,14 @@ def main():
     if args.load:
         checkpoint = torch.load(args.load)
     learner.to(device)
-    train_dataset = prepare_sinewave_dataset(1000, 30, 10)
-    # conventional_train(dataset, learner)
-    maml_model = train_with_maml(train_dataset, learner,
-            "sine_regression_ckpt", checkpoint)
-    test_dataset = prepare_sinewave_dataset(50, 30, 10)
-    test(test_dataset, maml_model)
+    if args.eval:
+        test_dataset = prepare_sinewave_dataset(100, 50, 10)
+        test_with_maml(test_dataset, learner, checkpoint)
+    else:
+        train_dataset = prepare_sinewave_dataset(1000, 30, 10)
+        # conventional_train(dataset, learner)
+        train_with_maml(train_dataset, learner,
+                args.checkpoint_path, checkpoint)
 
 
 if __name__ == "__main__":

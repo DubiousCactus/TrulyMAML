@@ -21,7 +21,7 @@ import os
 
 from pytictoc import TicToc
 from typing import List
-from time import sleep
+from tqdm import tqdm
 
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -70,6 +70,7 @@ class MAML(torch.nn.Module):
         self.inner_loss = torch.nn.MSELoss(reduction='sum')
         self.meta_loss = torch.nn.MSELoss(reduction='sum')
 
+
     def forward(self, tasks_batch, return_loss=False):
         # m_train should never intersect with m_test! So only shuffle the task
         # at creation!
@@ -85,18 +86,19 @@ class MAML(torch.nn.Module):
                 meta_loss, inner_loss = 0, 0
                 m_train, m_test = task[0], task[1]
                 for s in range(self.inner_steps):
-                    step_loss = 0
+                    step_loss, batch_len = 0, 1
                     for x, y in m_train:
                         # m_train is an iterator returning batches
                         y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
+                        batch_len = len(x)
+                    inner_loss += step_loss.detach() / batch_len
                     diff_opt.step(step_loss)
-                    inner_loss += step_loss.detach()
 
                 for x, y in m_test:
                     y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
-                    meta_loss += self.meta_loss(y_pred, y)
+                    meta_loss += self.meta_loss(y_pred, y) / len(x)
 
                 if return_loss:
                     meta_losses.append(meta_loss.detach()/len(m_test))
@@ -112,6 +114,7 @@ class MAML(torch.nn.Module):
         avg_meta_loss = sum(meta_losses) / len(tasks_batch) if return_loss else 0
         # t.toc()
         return avg_inner_loss, avg_meta_loss
+
 
     def forward_mp(self, tasks_batch, return_loss=False):
         # m_train should never intersect with m_test! So only shuffle the task
@@ -172,8 +175,15 @@ class MAML(torch.nn.Module):
                 # t.toc()
                 # t.tic()
 
+
     def eval(self, dataset: List[tuple]):
         self.learner.eval()
+        total_loss = 0
+        for i, task in tqdm(enumerate(dataset)):
+            inner_loss, meta_loss = self.forward([task], True)
+            # print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
+            total_loss += meta_loss
+        print(f"Total average loss: {total_loss/len(dataset)}")
 
 
     def restore(self, checkpoint):
