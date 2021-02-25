@@ -71,9 +71,9 @@ class SineWaveDataset(Dataset):
         return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
 
-def train_with_maml(dataset, learner, save_path, checkpoint=None):
+def train_with_maml(dataset, learner, save_path, steps, checkpoint=None):
     print("[*] Training...")
-    model = MAML(learner)
+    model = MAML(learner, steps=steps)
     model.to(device)
     epoch = 0
     if checkpoint:
@@ -83,9 +83,9 @@ def train_with_maml(dataset, learner, save_path, checkpoint=None):
     print("[*] Done!")
     return model
 
-def test_with_maml(dataset, learner, checkpoint):
+def test_with_maml(dataset, learner, checkpoint, steps):
     print("[*] Testing...")
-    model = MAML(learner)
+    model = MAML(learner, steps=steps)
     model.to(device)
     model.restore(checkpoint)
     model.eval(dataset)
@@ -153,17 +153,21 @@ def prepare_sinewave_dataset(tasks_num: int, samples_per_task: int, K: int) -> L
         sine_wave = SineWaveDataset(samples=samples_per_task)
         # sine_wave.shuffle() Shuffling induces terrible performance and slow
         # converging for regression!
+        # TODO: Use a subsetsampler without randomization to see if performance
+        # would improve
         meta_train_loader = DataLoader(
                 sine_wave,
                 batch_size=10,
                 # num_workers=8,
-                sampler=SubsetRandomSampler(range(K)),
+                # sampler=SubsetRandomSampler(range(K)),
+                sampler=list(range(K)),
                 pin_memory=False)
         meta_test_loader = DataLoader(
                 sine_wave,
                 batch_size=10,
                 # num_workers=8,
-                sampler=SubsetRandomSampler(range(K, len(sine_wave))),
+                # sampler=SubsetRandomSampler(range(K, len(sine_wave))),
+                sampler=list(range(K, len(sine_wave))),
                 pin_memory=False)
         tasks.append((meta_train_loader, meta_test_loader))
     return tasks
@@ -177,7 +181,13 @@ def main():
             checkpoint''')
     parser.add_argument('--eval', action='store_true', help='''Evaluation
     moed''')
+    parser.add_argument('-k', type=int, default=10, help='''Number of shots
+    for meta-training''')
+    parser.add_argument('-s', type=int, default=1, help='''Number of inner loop
+    optimization steps during meta-training''')
     args = parser.parse_args()
+
+    np.random.seed(1)
 
     learner = MLP(device)
     checkpoint = None
@@ -185,13 +195,13 @@ def main():
         checkpoint = torch.load(args.load)
     learner.to(device)
     if args.eval:
-        test_dataset = prepare_sinewave_dataset(100, 50, 10)
-        test_with_maml(test_dataset, learner, checkpoint)
+        test_dataset = prepare_sinewave_dataset(10, 30, args.k)
+        test_with_maml(test_dataset, learner, checkpoint, args.s)
     else:
-        train_dataset = prepare_sinewave_dataset(1000, 30, 10)
+        train_dataset = prepare_sinewave_dataset(1000, 30, args.k)
         # conventional_train(dataset, learner)
         train_with_maml(train_dataset, learner,
-                args.checkpoint_path, checkpoint)
+                args.checkpoint_path, args.s, checkpoint)
 
 
 if __name__ == "__main__":

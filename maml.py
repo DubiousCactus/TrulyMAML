@@ -55,13 +55,12 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-3, inner_lr=1e-3, K=10, steps=1):
+            meta_lr=1e-3, inner_lr=1e-3, steps=1):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
         self.inner_lr = inner_lr # This term is alpha in the paper
         self.learner = learner
-        self.K = K
         self.inner_steps = steps
         self.meta_opt = torch.optim.Adam(self.learner.parameters(),
                 lr=self.meta_lr)
@@ -85,6 +84,7 @@ class MAML(torch.nn.Module):
                     ) as (f_learner, diff_opt):
                 meta_loss, inner_loss = 0, 0
                 m_train, m_test = task[0], task[1]
+                f_learner.train()
                 for s in range(self.inner_steps):
                     step_loss, batch_len = 0, 1
                     for x, y in m_train:
@@ -95,6 +95,7 @@ class MAML(torch.nn.Module):
                     inner_loss += step_loss.detach() / batch_len
                     diff_opt.step(step_loss)
 
+                f_learner.eval()
                 for x, y in m_test:
                     y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
@@ -177,7 +178,7 @@ class MAML(torch.nn.Module):
 
 
     def eval(self, dataset: List[tuple]):
-        self.learner.eval()
+        self.learner.train()
         total_loss = 0
         for i, task in tqdm(enumerate(dataset)):
             inner_loss, meta_loss = self.forward([task], True)
