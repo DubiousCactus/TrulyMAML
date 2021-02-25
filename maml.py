@@ -17,6 +17,7 @@ import random
 import higher
 import torch
 import math
+import os
 
 from pytictoc import TicToc
 from typing import List
@@ -54,7 +55,7 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
 
 class MAML(torch.nn.Module):
     def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-3, inner_lr=1e-3, K=10, steps=1):
+            meta_lr=1e-3, inner_lr=1e-3, K=10, steps=5):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
@@ -99,7 +100,7 @@ class MAML(torch.nn.Module):
 
                 if return_loss:
                     meta_losses.append(meta_loss.detach()/len(m_test))
-                    inner_losses.append(inner_loss/len(m_train))
+                    inner_losses.append(inner_loss/(self.inner_steps*len(m_train)))
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
@@ -146,15 +147,21 @@ class MAML(torch.nn.Module):
         return total_meta_loss / len(tasks_batch) if return_loss else 0
 
 
-    def fit(self, dataset, tasks_per_iter: int, iterations: int):
+    def fit(self, dataset, tasks_per_iter: int, iterations: int, save_path: str):
         self.learner.train()
         # t = TicToc()
         # t.tic()
+        try:
+            os.makedirs(save_path)
+        except Exception:
+            pass
         for i in range(iterations):
             random.shuffle(dataset)
-            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
-            if i % 1000 == 0:
+            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%100 == 0)
+            if i % 100 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
+                torch.save(self.learner.state_dict(), os.path.join(save_path,
+                    f"epoch_{i}_loss-{meta_loss}"))
                 # t.toc()
                 # t.tic()
 

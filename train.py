@@ -32,11 +32,11 @@ device = "cpu"
 
 
 # TODO:
-# [ ] Save model state
+# [x] Save model state
 # [ ] Restore model state
+# [ ] Implement meta-testing (model evaluation)
 # [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
 # [ ] Implement OmniGlot classification
-# [ ] Implement meta-testing (model evaluation)
 # [ ] Try to vectorize the batch of tasks for faster training
 
 
@@ -68,11 +68,11 @@ class SineWaveDataset(Dataset):
         return self.x[idx].unsqueeze(dim=0), self.y[idx].unsqueeze(dim=0)
 
 
-def train_with_maml(dataset, learner):
+def train_with_maml(dataset, learner, save_path):
     print("[*] Training...")
     model = MAML(learner)
     model.to(device)
-    model.fit(dataset, 32, 50000)
+    model.fit(dataset, 25, 70000, save_path)
     print("[*] Done!")
     return model
 
@@ -163,8 +163,8 @@ def main():
     learner.to(device)
     train_dataset = prepare_sinewave_dataset(1000, 20, 10)
     # conventional_train(dataset, learner)
-    maml_model = train_with_maml(train_dataset, learner)
-    test_dataset = prepare_sinewave_dataset(50, 20, 10)
+    maml_model = train_with_maml(train_dataset, learner, "sine_regression_ckpt")
+    test_dataset = prepare_sinewave_dataset(50, 30, 10)
     test(test_dataset, maml_model)
 
 
