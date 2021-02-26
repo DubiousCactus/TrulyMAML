@@ -182,7 +182,7 @@ class MAML(torch.nn.Module):
         total_loss = 0
         for i, task in tqdm(enumerate(dataset)):
             inner_loss, meta_loss = self.forward([task], True)
-            print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
+            # print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
             total_loss += meta_loss
         print(f"Total average loss: {total_loss/len(dataset)}")
 
