@@ -42,3 +42,51 @@ class MLP(nn.Module):
 
     def forward(self, x):
         return self.net(x)
+
+
+class ConvNetClassifier(nn.Module):
+    def __init__(self, device, input_channels: int, n_classes: int):
+        super().__init__()
+        self.net = nn.Sequential(
+                nn.Conv2d(input_channels, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(64, n_classes),
+                nn.Softmax()).to(device)
+
+    def forward(self, x):
+        return self.net(x)
+
+
+class MLPClassifier(nn.Module):
+    def __init__(self, device, input_shape: tuple, n_classes: int):
+        super().__init__()
+        self.net = nn.Sequential(
+                nn.Linear(reduce(operator.mul, input_shape, 1), 256),
+                nn.BatchNorm1d(256),
+                nn.ReLU(),
+                nn.Linear(256, 128),
+                nn.BatchNorm1d(128),
+                nn.ReLU(),
+                nn.Linear(128, 64),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.Linear(64, 64),
+                nn.BatchNorm1d(64),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(64, n_classes),
+                nn.Softmax()).to(device)
+
+    def forward(self, x):
+        return self.net(x)

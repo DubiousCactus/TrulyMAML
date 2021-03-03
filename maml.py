@@ -161,8 +161,11 @@ class MAML(torch.nn.Module):
         except Exception:
             pass
         for i in range(epoch, iterations):
-            random.shuffle(dataset)
-            inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+            if type(dataset) == list:
+                random.shuffle(dataset)
+                inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+            else:
+                inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             if i % 1000 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
                 torch.save({
