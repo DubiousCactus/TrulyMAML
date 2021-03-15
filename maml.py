@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 #
-# Copyright © 2021 cactus <cactus@archcactus>
+# Copyright © 2021 Théo Morales <theo.morales.fr@gmail.com>
 #
 # Distributed under terms of the MIT license.
 
@@ -23,9 +23,8 @@ from pytictoc import TicToc
 from typing import List
 from tqdm import tqdm
 
+from const import device
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cpu"
 
 try: # otherwise it complains: context has already been set
   mp.set_start_method("spawn")
@@ -78,6 +77,7 @@ class MAML(torch.nn.Module):
         self.meta_opt.zero_grad()
         # t = TicToc()
         # t.tic()
+        # TODO: Adapt for OmniGlot
         for i, task in enumerate(tasks_batch):
             with higher.innerloop_ctx(
                     self.learner, self.inner_opt, copy_initial_weights=False
@@ -165,7 +165,7 @@ class MAML(torch.nn.Module):
                 random.shuffle(dataset)
                 inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             else:
-                inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+                inner_loss, meta_loss = self.forward(dataset, i%1000 == 0)
             if i % 1000 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
                 torch.save({

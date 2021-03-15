@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # vim:fenc=utf-8
 #
-# Copyright © 2021 cactus <cactus@archcactus>
+# Copyright © 2021 Théo Morales <theo.morales.fr@gmail.com>
 #
 # Distributed under terms of the MIT license.
 
