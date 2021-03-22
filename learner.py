@@ -47,7 +47,7 @@ class MLP(nn.Module):
 class ConvNetClassifier(nn.Module):
     def __init__(self, device, input_channels: int, n_classes: int):
         super().__init__()
-        self.net = nn.Sequential(
+        self.cnn = nn.Sequential(
                 nn.Conv2d(input_channels, 64, 3),
                 nn.BatchNorm2d(64),
                 nn.ReLU(),
@@ -59,13 +59,17 @@ class ConvNetClassifier(nn.Module):
                 nn.ReLU(),
                 nn.Conv2d(64, 64, 3),
                 nn.BatchNorm2d(64),
-                nn.ReLU(),
-                nn.Flatten(),
-                nn.Linear(64, n_classes),
-                nn.Softmax()).to(device)
+                nn.ReLU())
+        self.flc = nn.Sequential(
+                # nn.Flatten(start_dim=1),
+                nn.Linear(64*20*20, n_classes)).to(device)
+                # nn.Softmax()).to(device)  # No softmax because we use Cross Entropy loss
 
     def forward(self, x):
-        return self.net(x)
+        x = self.cnn(x)
+        x = x.view(x.size(0), -1)
+        x = self.flc(x)
+        return x
 
 
 class MLPClassifier(nn.Module):

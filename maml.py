@@ -42,6 +42,7 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
             for x, y in m_train:
                 # m_train is an iterator returning batches
                 y_pred = f_learner(x)
+                # TODO: Parametrize the loss function
                 step_loss += F.mse_loss(y_pred, y)
             diff_opt.step(step_loss)
 
@@ -53,8 +54,8 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
 
 
 class MAML(torch.nn.Module):
-    def __init__(self, learner: torch.nn.Module,
-            meta_lr=1e-3, inner_lr=1e-3, steps=1):
+    def __init__(self, learner: torch.nn.Module, meta_lr=1e-3, inner_lr=1e-3, steps=1,
+            loss_function=torch.nn.MSELoss(reduction='sum')):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
         # TODO: Make the inner learning rate optionally learnable
@@ -65,11 +66,12 @@ class MAML(torch.nn.Module):
                 lr=self.meta_lr)
         self.inner_opt = torch.optim.SGD(self.learner.parameters(),
                 lr=self.inner_lr)
-        self.inner_loss = torch.nn.MSELoss(reduction='sum')
-        self.meta_loss = torch.nn.MSELoss(reduction='sum')
+        self.inner_loss = loss_function
+        self.meta_loss = loss_function
 
 
     def forward(self, tasks_batch, return_loss=False):
+        # TODO: Rename m_train to support_set and m_test to query_set
         # m_train should never intersect with m_test! So only shuffle the task
         # at creation!
         # For each task in the batch
@@ -77,7 +79,6 @@ class MAML(torch.nn.Module):
         self.meta_opt.zero_grad()
         # t = TicToc()
         # t.tic()
-        # TODO: Adapt for OmniGlot
         for i, task in enumerate(tasks_batch):
             with higher.innerloop_ctx(
                     self.learner, self.inner_opt, copy_initial_weights=False
@@ -165,7 +166,7 @@ class MAML(torch.nn.Module):
                 random.shuffle(dataset)
                 inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             else:
-                inner_loss, meta_loss = self.forward(dataset, i%1000 == 0)
+                inner_loss, meta_loss = self.forward(next(dataset), i%1000 == 0)
             if i % 1000 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
                 torch.save({
