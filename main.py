@@ -120,8 +120,10 @@ def parse_args():
     minus <K>.''')
     parser.add_argument('-k', type=int, default=10, help='''Number of shots
     for meta-training''')
-    parser.add_argument('-n', type=int, default=15, help='''Number of
+    parser.add_argument('-q', type=int, default=15, help='''Number of
     meta-testing samples''')
+    parser.add_argument('-n', type=int, default=5, help='''Number of classes for n-way
+    classification''')
     parser.add_argument('-s', type=int, default=1, help='''Number of inner loop
     optimization steps during meta-training''')
     parser.add_argument('--dataset', choices=['omniglot', 'sinusoid'])
@@ -144,14 +146,14 @@ def main():
     learner.to(device)
     if args.eval:
         test_dataset = (SineWaveDataset(1000, args.samples, args.k,
-            args.n, False) if args.dataset == 'sinusoid' else
-            OmniglotDataset(args.meta_batch_size, 28, args.k, args.n, 5, background=False))
+            args.q, False) if args.dataset == 'sinusoid' else
+            OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, background=False))
         test_with_maml(test_dataset, learner, checkpoint, args.s, torch.nn.MSELoss(reduction='sum')
                 if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss())
     else:
         train_dataset = (SineWaveDataset(1000000, args.samples, args.k,
-                args.n, False) if args.dataset == 'sinusoid' else
-                OmniglotDataset(args.meta_batch_size, 28, args.k, args.n, 5, background=True))
+                args.q, False) if args.dataset == 'sinusoid' else
+                OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, background=True))
         # conventional_train(dataset, learner)
         train_with_maml(train_dataset, learner,
                 args.checkpoint_path, args.s, args.meta_batch_size,

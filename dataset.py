@@ -131,12 +131,12 @@ class OmniglotDataset:
             # TODO: Randomly index the class/index?
             cls = self.idx + j
             support = DataLoader(
-                    list(zip(self.x[cls][:self.k_shot], [cls]*self.k_shot)),
+                    list(zip(self.x[cls][:self.k_shot], [j]*self.k_shot)),
                     batch_size=self.k_shot,
                     shuffle=True)
             query = DataLoader(
                     list(zip(self.x[cls][self.k_shot:self.k_shot+self.k_query],
-                        [cls]*self.k_query)),
+                        [j]*self.k_query)),
                     batch_size=self.k_query,
                     shuffle=True)
             batch.append((support, query))
