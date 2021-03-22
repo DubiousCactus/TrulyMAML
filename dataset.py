@@ -14,6 +14,7 @@ import numpy as np
 import torchvision
 import torch
 import math
+import os
 
 from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset, SubsetRandomSampler
 from tqdm import tqdm
@@ -78,13 +79,22 @@ class SineWaveDataset:
 
 class OmniglotDataset:
     def __init__(self, batch_size: int, img_size: int, k_shot: int, k_query: int, n_way: int, background: bool = False):
-        print("[*] Loading Omniglot...")
         assert k_shot + k_query <= 20, "Not enough samples per class for such k-shot and k-query values!"
         self.idx = 0
         self.k_shot = k_shot
         self.k_query = k_query
         self.n_way = n_way
-        self.dataset = torchvision.datasets.Omniglot(root='./datasets/',
+        path = os.path.join('datasets', 'omniglot.npy')
+        if os.path.exists(path):
+            print("[*] Loading Omniglot from a saved file...")
+            self.x = np.load(path)
+        else:
+            print("[*] Loading and preparing Omniglot...")
+            self.x = self._load(background, img_size, batch_size)
+            np.save(path, self.x)
+
+    def _load(self, background, img_size, batch_size):
+        dataset = torchvision.datasets.Omniglot(root='./datasets/',
                 download=True, background=background,
                 transform=torchvision.transforms.Compose([
                     lambda x: x.convert('L'),
@@ -92,22 +102,23 @@ class OmniglotDataset:
                     lambda x: np.reshape(x, (img_size, img_size, 1)),
                     lambda x: np.transpose(x, [2, 0, 1]),
                     lambda x: x/255.]))
-        self.loader = DataLoader(self.dataset, batch_size=batch_size, shuffle=True)
+        self.loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         # TODO: pin memory or load on GPU?
         tmp = dict()
-        self.x = []
-        t = tqdm(total=len(self.dataset))
-        for x, y in self.dataset:
+        data = []
+        t = tqdm(total=len(dataset))
+        for x, y in dataset:
             if y not in tmp:
                 tmp[y] = []
             tmp[y].append(x)
             t.update()
         for y, x in tmp.items():
-            self.x.append(np.array(x))
+            data.append(np.array(x))
             t.update()
-        self.x = np.array(self.x).astype(np.float32)
+        data = np.array(data).astype(np.float32)
         del tmp
         t.close()
+        return data
 
     def __iter__(self):
         self.idx = 0
