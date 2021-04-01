@@ -134,12 +134,12 @@ class OmniglotDataset:
         for i, class_ in enumerate(classes):
             samples = np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False)
             support = DataLoader(
-                    list(zip(self.dataset[class_][samples[:self.k_shot]], [i]*self.k_shot)),
+                    list(zip(self.dataset[class_][samples[:self.k_shot]], torch.tensor([i]*self.k_shot, device=device))),
                     batch_size=self.k_shot,
                     shuffle=True,
                     pin_memory=False)
             query = DataLoader(
-                    list(zip(self.dataset[class_][samples[self.k_shot:]], [i]*self.k_query)),
+                    list(zip(self.dataset[class_][samples[self.k_shot:]], torch.tensor([i]*self.k_query, device=device))),
                     batch_size=self.k_query,
                     shuffle=True,
                     pin_memory=False)
