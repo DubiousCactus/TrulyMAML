@@ -85,13 +85,14 @@ class OmniglotDataset:
         self.k_query = k_query
         self.n_way = n_way
         path = os.path.join('datasets', 'omniglot.npy')
-        if os.path.exists(path):
+        if os.path.exists(path) and device == "cpu":
             print("[*] Loading Omniglot from a saved file...")
-            self.x = np.load(path)
+            self.dataset = np.load(path)
         else:
             print("[*] Loading and preparing Omniglot...")
-            self.x = self._load(background, img_size, batch_size)
-            np.save(path, self.x)
+            self.dataset = self._load(background, img_size, batch_size)
+            if device == "cpu":
+                np.save(path, self.dataset)
 
     def _load(self, background, img_size, batch_size):
         dataset = torchvision.datasets.Omniglot(root='./datasets/',
@@ -113,9 +114,9 @@ class OmniglotDataset:
             tmp[y].append(x)
             t.update()
         for y, x in tmp.items():
-            data.append(np.array(x))
+            data.append(np.array(x, dtype=np.float32))
             t.update()
-        data = np.array(data).astype(np.float32)
+        data = torch.tensor(data, device=device)
         del tmp
         t.close()
         return data
@@ -125,20 +126,22 @@ class OmniglotDataset:
         return self
 
     def __next__(self):
+        '''
+        Build a batch of N (for N-way classification) tasks, where each task is a random class.
+        '''
         batch = []
-        for j in range(self.n_way):
-            # Build the support set with K shots
-            # TODO: Randomly index the class/index?
-            cls = self.idx + j
+        classes = np.random.choice(self.dataset.shape[0], self.n_way, False)
+        for i, class_ in enumerate(classes):
+            samples = np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False)
             support = DataLoader(
-                    list(zip(self.x[cls][:self.k_shot], [j]*self.k_shot)),
+                    list(zip(self.dataset[class_][samples[:self.k_shot]], [i]*self.k_shot)),
                     batch_size=self.k_shot,
-                    shuffle=True)
+                    shuffle=True,
+                    pin_memory=False)
             query = DataLoader(
-                    list(zip(self.x[cls][self.k_shot:self.k_shot+self.k_query],
-                        [j]*self.k_query)),
+                    list(zip(self.dataset[class_][samples[self.k_shot:]], [i]*self.k_query)),
                     batch_size=self.k_query,
-                    shuffle=True)
+                    shuffle=True,
+                    pin_memory=False)
             batch.append((support, query))
-        self.idx += self.n_way
         return batch

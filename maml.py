@@ -166,8 +166,8 @@ class MAML(torch.nn.Module):
                 random.shuffle(dataset)
                 inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             else:
-                inner_loss, meta_loss = self.forward(next(dataset), i%10 == 0)
-            if i % 10 == 0:
+                inner_loss, meta_loss = self.forward(next(dataset), i%100 == 0)
+            if i % 100 == 0:
                 print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
                 torch.save({
                     'epoch': i,
