@@ -36,25 +36,25 @@ def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, retu
     with higher.innerloop_ctx(
             learner, inner_opt, copy_initial_weights=False
             ) as (f_learner, diff_opt):
-        m_train, m_test = task[0], task[1]
+        sprt, qry = task[0], task[1]
         for s in range(inner_steps):
             step_loss = 0
-            for x, y in m_train:
-                # m_train is an iterator returning batches
+            for x, y in sprt:
+                # sprt is an iterator returning batches
                 y_pred = f_learner(x)
                 # TODO: Parametrize the loss function
                 step_loss += F.mse_loss(y_pred, y)
             diff_opt.step(step_loss)
 
-        for x, y in m_test:
+        for x, y in qry:
             y_pred = f_learner(x) # Use the updated model for that task
             # Accumulate the loss over all tasks in the meta-testing set
-            meta_loss += F.mse_loss(y_pred, y) / (len(x)*len(m_test))
+            meta_loss += F.mse_loss(y_pred, y) / (len(x)*len(qry))
     return_dict[rank] = meta_loss.detach()
 
 
 class MAML(torch.nn.Module):
-    def __init__(self, learner: torch.nn.Module, meta_lr=1e-3, inner_lr=1e-3, steps=1,
+    def __init__(self, learner: torch.nn.Module, meta_lr=1e-4, inner_lr=1e-3, steps=1,
             loss_function=torch.nn.MSELoss(reduction='sum')):
         super().__init__()
         self.meta_lr = meta_lr # This term is beta in the paper
@@ -71,8 +71,7 @@ class MAML(torch.nn.Module):
 
 
     def forward(self, tasks_batch, return_loss=False):
-        # TODO: Rename m_train to support_set and m_test to query_set
-        # m_train should never intersect with m_test! So only shuffle the task
+        # sprt should never intersect with qry! So only shuffle the task
         # at creation!
         # For each task in the batch
         inner_losses, meta_losses = [], []
@@ -84,31 +83,32 @@ class MAML(torch.nn.Module):
                     self.learner, self.inner_opt, copy_initial_weights=False
                     ) as (f_learner, diff_opt):
                 meta_loss, inner_loss = 0, 0
-                m_train, m_test = task[0], task[1]
+                sprt, qry = task
                 f_learner.train()
                 for s in range(self.inner_steps):
                     step_loss, batch_len = 0, 1
-                    for x, y in m_train:
-                        # m_train is an iterator returning batches
+                    for x, y in sprt:
+                        # sprt is an iterator returning batches
                         y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
                         batch_len = len(x)
                     inner_loss += step_loss.detach() / batch_len
-                    diff_opt.step(step_loss)
+                    diff_opt.step(step_loss/len(sprt))
 
                 f_learner.eval()
-                for x, y in m_test:
+                for x, y in qry:
                     y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
-                    meta_loss += self.meta_loss(y_pred, y) / len(x)
+                    meta_loss += self.meta_loss(y_pred, y)# / len(x)
 
                 if return_loss:
-                    meta_losses.append(meta_loss.detach()/len(m_test))
-                    inner_losses.append(inner_loss/(self.inner_steps*len(m_train)))
+                    meta_losses.append(meta_loss.detach()/len(qry))
+                    inner_losses.append(inner_loss/(self.inner_steps*len(sprt)))
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
                 # This unrolls through the gradient steps.
+                meta_loss /= len(qry)
                 meta_loss.backward()
 
         self.meta_opt.step()
@@ -119,7 +119,7 @@ class MAML(torch.nn.Module):
 
 
     def forward_mp(self, tasks_batch, return_loss=False):
-        # m_train should never intersect with m_test! So only shuffle the task
+        # sprt should never intersect with qry! So only shuffle the task
         # at creation!
         # For each task in the batch
         '''
@@ -161,14 +161,20 @@ class MAML(torch.nn.Module):
             os.makedirs(save_path)
         except Exception:
             pass
+        global_avg_inner_loss, global_avg_meta_loss = 0, 0
         for i in range(epoch, iterations):
             if type(dataset) == list:
                 random.shuffle(dataset)
                 inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
             else:
-                inner_loss, meta_loss = self.forward(next(dataset), i%100 == 0)
-            if i % 100 == 0:
-                print(f"[{i}] Avg Inner Loss={inner_loss} - Avg Meta-testing Loss={meta_loss}")
+                inner_loss, meta_loss = self.forward(next(dataset), i%1000 == 0)
+            global_avg_inner_loss += inner_loss
+            global_avg_meta_loss += meta_loss
+            if i % 1000 == 0:
+                if i != 0:
+                    global_avg_inner_loss /= 1000
+                    global_avg_meta_loss /= 1000
+                print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Meta-testing Loss={global_avg_meta_loss} (averaged over 1000 epochs)")
                 torch.save({
                     'epoch': i,
                     'model_state_dict': self.learner.state_dict(),
@@ -177,6 +183,8 @@ class MAML(torch.nn.Module):
                     'inner_loss': self.inner_loss,
                     'meta_loss': self.meta_loss
                     }, os.path.join(save_path, f"epoch_{i}_loss-{meta_loss}.tar"))
+                global_avg_inner_loss = 0
+                global_avg_meta_loss = 0
                 # t.toc()
                 # t.tic()
 
@@ -184,10 +192,18 @@ class MAML(torch.nn.Module):
     def eval(self, dataset: List[tuple]):
         self.learner.train()
         total_loss = 0
-        for i, task in tqdm(enumerate(dataset)):
-            inner_loss, meta_loss = self.forward([task], True)
-            # print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
-            total_loss += meta_loss
+        if type(dataset) == list:
+            for i, task in tqdm(enumerate(dataset)):
+                inner_loss, meta_loss = self.forward([task], True)
+                # print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
+                total_loss += meta_loss
+        else:
+            for i, batch in tqdm(enumerate(dataset)):
+                if not batch:
+                    break
+                inner_loss, meta_loss = self.forward(batch, True)
+                # print(f"[Batch {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
+                total_loss += meta_loss
         print(f"Total average loss: {total_loss/len(dataset)}")
 
 

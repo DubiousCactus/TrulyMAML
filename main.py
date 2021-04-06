@@ -31,7 +31,7 @@ from pytictoc import TicToc
 # [x] Save model state
 # [x] Restore model state
 # [x] Implement meta-testing (model evaluation)
-# [ ] Implement OmniGlot classification
+# [x] Implement OmniGlot classification
 # [ ] Clip the gradients to prevent NaN loss!
 # [ ] Implement data generator for sine waves, and use it for on-the-fly batch generation
 # [ ] Try to vectorize the batch of tasks for faster training
@@ -54,6 +54,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
 
 def test_with_maml(dataset, learner, checkpoint, steps, loss_fn):
     print("[*] Testing...")
+    assert checkpoint is not None, "Please load the model from a checkpoint!"
     model = MAML(learner, steps=steps, loss_function=loss_fn)
     model.to(device)
     model.restore(checkpoint)
@@ -147,18 +148,18 @@ def main():
     if args.eval:
         test_dataset = (SineWaveDataset(1000, args.samples, args.k,
             args.q, False) if args.dataset == 'sinusoid' else
-            OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, background=False))
+            OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=True))
         test_with_maml(test_dataset, learner, checkpoint, args.s, torch.nn.MSELoss(reduction='sum')
-                if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss())
+                if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
     else:
         train_dataset = (SineWaveDataset(1000000, args.samples, args.k,
                 args.q, False) if args.dataset == 'sinusoid' else
-                OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, background=True))
+                OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=False))
         # conventional_train(dataset, learner)
         train_with_maml(train_dataset, learner,
                 args.checkpoint_path, args.s, args.meta_batch_size,
                 args.iterations, checkpoint, torch.nn.MSELoss(reduction='sum') if args.dataset ==
-                "sinusoid" else torch.nn.CrossEntropyLoss())
+                "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
 
 
 if __name__ == "__main__":
