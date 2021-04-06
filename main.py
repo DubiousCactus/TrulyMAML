@@ -54,10 +54,11 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
 
 def test_with_maml(dataset, learner, checkpoint, steps, loss_fn):
     print("[*] Testing...")
-    assert checkpoint is not None, "Please load the model from a checkpoint!"
+    # assert checkpoint is not None, "Please load the model from a checkpoint!"
     model = MAML(learner, steps=steps, loss_function=loss_fn)
     model.to(device)
-    model.restore(checkpoint)
+    if checkpoint:
+        model.restore(checkpoint, resume_training=False)
     model.eval(dataset)
     print("[*] Done!")
 

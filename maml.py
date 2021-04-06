@@ -19,6 +19,7 @@ import torch
 import math
 import os
 
+from dataset import SineWaveDataset
 from pytictoc import TicToc
 from typing import List
 from tqdm import tqdm
@@ -30,7 +31,7 @@ try: # otherwise it complains: context has already been set
   mp.set_start_method("spawn")
 except: pass
 
-def forward_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, return_dict):
+def train_on_batch_on_task(rank, inner_steps, task, learner, inner_opt, optimizer, return_dict):
     meta_loss = 0
     optimizer.zero_grad()
     with higher.innerloop_ctx(
@@ -70,7 +71,7 @@ class MAML(torch.nn.Module):
         self.meta_loss = loss_function
 
 
-    def forward(self, tasks_batch, return_loss=False):
+    def train_on_batch(self, tasks_batch, return_loss=False):
         # sprt should never intersect with qry! So only shuffle the task
         # at creation!
         # For each task in the batch
@@ -118,7 +119,23 @@ class MAML(torch.nn.Module):
         return avg_inner_loss, avg_meta_loss
 
 
-    def forward_mp(self, tasks_batch, return_loss=False):
+    def adapt(self, task_support):
+        '''
+        Adapt the model to the task using the support set
+        '''
+        self.learner.train()
+        for s in range(self.inner_steps):
+            self.inner_opt.zero_grad()
+            step_loss = 0
+            for x, y in task_support:
+                y_pred = self.learner(x)
+                step_loss += self.inner_loss(y_pred, y)
+            print(step_loss)
+            step_loss.backward()
+            self.inner_opt.step()
+
+
+    def train_on_batch_mp(self, tasks_batch, return_loss=False):
         # sprt should never intersect with qry! So only shuffle the task
         # at creation!
         # For each task in the batch
@@ -131,7 +148,7 @@ class MAML(torch.nn.Module):
         manager = mp.Manager()
         return_dict = manager.dict()
         for rank in range(len(tasks_batch)):
-            p = mp.Process(target=forward_on_task,
+            p = mp.Process(target=train_on_batch_on_task,
                     args=(rank, self.inner_steps, tasks_batch[rank],
                         self.learner, self.inner_opt, self.meta_opt,
                         return_dict))
@@ -165,9 +182,9 @@ class MAML(torch.nn.Module):
         for i in range(epoch, iterations):
             if type(dataset) == list:
                 random.shuffle(dataset)
-                inner_loss, meta_loss = self.forward(dataset[:tasks_per_iter], i%1000 == 0)
+                inner_loss, meta_loss = self.train_on_batch(dataset[:tasks_per_iter], i%1000 == 0)
             else:
-                inner_loss, meta_loss = self.forward(next(dataset), i%1000 == 0)
+                inner_loss, meta_loss = self.train_on_batch(next(dataset), i%1000 == 0)
             global_avg_inner_loss += inner_loss
             global_avg_meta_loss += meta_loss
             if i % 1000 == 0:
@@ -190,26 +207,47 @@ class MAML(torch.nn.Module):
 
 
     def eval(self, dataset: List[tuple]):
-        self.learner.train()
         total_loss = 0
-        if type(dataset) == list:
+        # TODO: Save the model parameters
+        params = self.learner.parameters()
+        if type(dataset) is SineWaveDataset:
             for i, task in tqdm(enumerate(dataset)):
-                inner_loss, meta_loss = self.forward([task], True)
-                # print(f"[Task {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
-                total_loss += meta_loss
+                self.adapt(task[0])
+                task_loss = 0
+                self.learner.eval()
+                for x, y in task[1]:
+                    y_pred = self.learner(x)
+                    task_loss += self.inner_loss(y_pred, y)/len(x)
+                task_loss /= len(task[1])
+                print(f"[Task {i}] Loss={task_loss}")
+                total_loss += task_loss
+                # Restore the model parameters
+                self.learner.parameters = params
+            total_loss /= len(dataset)
         else:
             for i, batch in tqdm(enumerate(dataset)):
                 if not batch:
                     break
-                inner_loss, meta_loss = self.forward(batch, True)
-                # print(f"[Batch {i}] Inner Loss={inner_loss} - Meta-testing Loss={meta_loss}")
-                total_loss += meta_loss
-        print(f"Total average loss: {total_loss/len(dataset)}")
+                for task in batch:
+                    self.adapt(task[0])
+                    task_loss = 0
+                    self.learner.eval()
+                    for x, y in task[1]:
+                        y_pred = self.learner(x)
+                        task_loss += self.inner_loss(y_pred, y)
+                    task_loss /= len(task[1])
+                    print(f"[Batch {i}] Loss={task_loss}")
+                    total_loss += task_loss
+                    # TODO: Restore the model parameters
+                self.learner.parameters = params
+            total_loss /= dataset.total_batches
+        print(f"Total average loss: {total_loss}")
 
 
-    def restore(self, checkpoint):
+    def restore(self, checkpoint, resume_training=True):
         self.learner.load_state_dict(checkpoint['model_state_dict'])
-        self.inner_opt.load_state_dict(checkpoint['inner_opt_state_dict'])
         self.meta_opt.load_state_dict(checkpoint['meta_opt_state_dict'])
         self.meta_loss = checkpoint['meta_loss']
-        self.inner_loss = checkpoint['inner_loss']
+        if resume_training:
+            self.inner_opt.load_state_dict(checkpoint['inner_opt_state_dict'])
+            self.inner_loss = checkpoint['inner_loss']

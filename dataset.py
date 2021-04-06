@@ -76,6 +76,13 @@ class SineWaveDataset:
                     pin_memory=False)
             self.tasks.append((meta_train_loader, meta_test_loader))
 
+    def __iter__(self):
+        for t in self.tasks:
+            yield t
+
+    def __len__(self):
+        return len(self.tasks)
+
 
 class OmniglotDataset:
     def __init__(self, batch_size: int, img_size: int, k_shot: int, k_query: int, n_way: int,
@@ -127,12 +134,9 @@ class OmniglotDataset:
         self.idx = 0
         return self
 
-    def __len__(self):
-        '''
-        Maybe this is not right but len(dataset) is used to obtain the number of batches so that
-        works...
-        '''
-        return self.dataset.shape[0]
+    @property
+    def total_batches(self):
+        return self.dataset.shape[0] / self.n_way
 
     def __next__(self):
         '''
