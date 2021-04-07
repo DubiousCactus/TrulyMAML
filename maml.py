@@ -94,7 +94,7 @@ class MAML(torch.nn.Module):
                         step_loss += self.inner_loss(y_pred, y)
                         batch_len = len(x)
                     inner_loss += step_loss.detach() / batch_len
-                    diff_opt.step(step_loss/len(sprt))
+                    diff_opt.step(step_loss)
 
                 f_learner.eval()
                 for x, y in qry:
@@ -117,6 +117,28 @@ class MAML(torch.nn.Module):
         avg_meta_loss = sum(meta_losses) / len(tasks_batch) if return_loss else 0
         # t.toc()
         return avg_inner_loss, avg_meta_loss
+
+    
+    def eval_task_batch(self, task_batch):
+        batch_loss = 0 # Average loss of the batch of tasks
+        for task in task_batch:
+            with higher.innerloop_ctx(self.learner, self.inner_opt) as (f_learner, diff_opt):
+                qry_loss = 0
+                sprt, qry = task
+                f_learner.train()
+                for s in range(self.inner_steps):
+                    step_loss = 0
+                    for x, y in sprt:
+                        y_pred = f_learner(x)
+                        step_loss += self.inner_loss(y_pred, y)
+                    diff_opt.step(step_loss)
+
+                f_learner.eval()
+                for x, y in qry:
+                    y_pred = f_learner(x)
+                    qry_loss += self.inner_loss(y_pred, y) / len(x)
+                batch_loss += qry_loss / len(qry)
+        return batch_loss
 
 
     def adapt(self, task_support):
@@ -206,42 +228,50 @@ class MAML(torch.nn.Module):
                 # t.tic()
 
 
-    def eval(self, dataset: List[tuple]):
-        total_loss = 0
-        # TODO: Save the model parameters
-        params = self.learner.parameters()
+    def eval(self, dataset):
         if type(dataset) is SineWaveDataset:
-            for i, task in tqdm(enumerate(dataset)):
-                self.adapt(task[0])
-                task_loss = 0
-                self.learner.eval()
-                for x, y in task[1]:
-                    y_pred = self.learner(x)
-                    task_loss += self.inner_loss(y_pred, y)/len(x)
-                task_loss /= len(task[1])
-                print(f"[Task {i}] Loss={task_loss}")
-                total_loss += task_loss
-                # Restore the model parameters
-                self.learner.parameters = params
-            total_loss /= len(dataset)
-        else:
-            for i, batch in tqdm(enumerate(dataset)):
-                if not batch:
-                    break
-                for task in batch:
-                    self.adapt(task[0])
-                    task_loss = 0
-                    self.learner.eval()
-                    for x, y in task[1]:
-                        y_pred = self.learner(x)
-                        task_loss += self.inner_loss(y_pred, y)
-                    task_loss /= len(task[1])
-                    print(f"[Batch {i}] Loss={task_loss}")
-                    total_loss += task_loss
-                    # TODO: Restore the model parameters
-                self.learner.parameters = params
-            total_loss /= dataset.total_batches
-        print(f"Total average loss: {total_loss}")
+            batch_size = 32
+            total_loss = 0
+            for i in tqdm(range(len(dataset)//batch_size + 1)):
+                start = i*batch_size
+                end = min(len(dataset)-1, start + batch_size)
+                total_loss += self.eval_task_batch(dataset[start:end])
+            print(f"Total average loss: {total_loss/batch_size}")
+        # total_loss = 0
+        # # TODO: Save the model parameters
+        # params = self.learner.parameters()
+        # if type(dataset) is SineWaveDataset:
+            # for i, task in tqdm(enumerate(dataset)):
+                # self.adapt(task[0])
+                # task_loss = 0
+                # self.learner.eval()
+                # for x, y in task[1]:
+                    # y_pred = self.learner(x)
+                    # task_loss += self.inner_loss(y_pred, y)/len(x)
+                # task_loss /= len(task[1])
+                # print(f"[Task {i}] Loss={task_loss}")
+                # total_loss += task_loss
+                # # Restore the model parameters
+                # self.learner.parameters = params
+            # total_loss /= len(dataset)
+        # else:
+            # for i, batch in tqdm(enumerate(dataset)):
+                # if not batch:
+                    # break
+                # for task in batch:
+                    # self.adapt(task[0])
+                    # task_loss = 0
+                    # self.learner.eval()
+                    # for x, y in task[1]:
+                        # y_pred = self.learner(x)
+                        # task_loss += self.inner_loss(y_pred, y)
+                    # task_loss /= len(task[1])
+                    # print(f"[Batch {i}] Loss={task_loss}")
+                    # total_loss += task_loss
+                    # # TODO: Restore the model parameters
+                # self.learner.parameters = params
+            # total_loss /= dataset.total_batches
+        # print(f"Total average loss: {total_loss}")
 
 
     def restore(self, checkpoint, resume_training=True):

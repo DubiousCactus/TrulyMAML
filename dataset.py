@@ -80,6 +80,9 @@ class SineWaveDataset:
         for t in self.tasks:
             yield t
 
+    def __getitem__(self, idx):
+        return self.tasks[idx]
+
     def __len__(self):
         return len(self.tasks)
 
