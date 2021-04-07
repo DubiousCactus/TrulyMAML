@@ -21,6 +21,7 @@ import os
 
 from dataset import SineWaveDataset
 from pytictoc import TicToc
+from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 
@@ -127,7 +128,6 @@ class MAML(torch.nn.Module):
                 sprt, qry = task
                 f_learner.train()
                 for s in range(self.inner_steps):
-                    diff_opt.zero_grad()
                     step_loss = 0
                     for x, y in sprt:
                         y_pred = f_learner(x)
@@ -139,7 +139,7 @@ class MAML(torch.nn.Module):
                     y_pred = f_learner(x)
                     qry_loss += self.inner_loss(y_pred, y) / len(x)
                 batch_loss += qry_loss / len(qry)
-        return batch_loss
+        return batch_loss/len(task_batch)
 
 
     def adapt(self, task_support):
@@ -153,7 +153,6 @@ class MAML(torch.nn.Module):
             for x, y in task_support:
                 y_pred = self.learner(x)
                 step_loss += self.inner_loss(y_pred, y)
-            print(step_loss)
             step_loss.backward()
             self.inner_opt.step()
 
@@ -229,32 +228,33 @@ class MAML(torch.nn.Module):
                 # t.tic()
 
 
-    def eval(self, dataset):
+    def eval(self, dataset, checkpoint):
         if type(dataset) is SineWaveDataset:
             batch_size = 32
-            total_loss = 0
-            for i in tqdm(range(len(dataset)//batch_size + 1)):
+            avg_batch_loss = 0
+            batch_count = len(dataset)//batch_size + 1
+            for i in tqdm(range(batch_count)):
                 start = i*batch_size
-                end = min(len(dataset)-1, start + batch_size)
-                total_loss += self.eval_task_batch(dataset[start:end])
-            print(f"Total average loss: {total_loss/batch_size}")
-        # total_loss = 0
-        # # TODO: Save the model parameters
-        # params = self.learner.parameters()
-        # if type(dataset) is SineWaveDataset:
-            # for i, task in tqdm(enumerate(dataset)):
-                # self.adapt(task[0])
-                # task_loss = 0
-                # self.learner.eval()
-                # for x, y in task[1]:
-                    # y_pred = self.learner(x)
-                    # task_loss += self.inner_loss(y_pred, y)/len(x)
-                # task_loss /= len(task[1])
-                # print(f"[Task {i}] Loss={task_loss}")
-                # total_loss += task_loss
-                # # Restore the model parameters
-                # self.learner.parameters = params
-            # total_loss /= len(dataset)
+                end = min(len(dataset), start + batch_size)
+                avg_batch_loss += self.eval_task_batch(dataset[start:end])
+            print(f"Total average loss: {avg_batch_loss/batch_count}")
+            print(f"Without using higher:\n (example for inference)")
+            total_loss = 0
+            # Save the model parameters
+            state_dict = deepcopy(self.learner.state_dict())
+            for i, task in tqdm(enumerate(dataset)):
+                # Restore the model parameters
+                self.learner.load_state_dict(state_dict)
+                self.adapt(task[0])
+                with torch.no_grad():
+                    task_loss = 0 # Average loss per point in the task
+                    self.learner.eval()
+                    for x, y in task[1]:
+                        y_pred = self.learner(x)
+                        task_loss += self.inner_loss(y_pred, y) / len(x)
+                    task_loss /= len(task[1])
+                    total_loss += task_loss
+            print(f"Total average loss: {total_loss/len(dataset)}")
         # else:
             # for i, batch in tqdm(enumerate(dataset)):
                 # if not batch:
