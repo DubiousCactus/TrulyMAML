@@ -58,6 +58,8 @@ def test_with_maml(dataset, learner, checkpoint, steps, loss_fn):
     model.to(device)
     if checkpoint:
         model.restore(checkpoint, resume_training=False)
+    else:
+        print("[!] You are running inference on a randomly initialized model!")
     model.eval(dataset, checkpoint)
     print("[*] Done!")
 
@@ -138,7 +140,7 @@ def parse_args():
 
 def main():
     args = parse_args()
-    np.random.seed(2)
+    np.random.seed(5)
 
     learner = MLP(device) if args.dataset == "sinusoid" else ConvNetClassifier(device, 1, 20)
     checkpoint = None

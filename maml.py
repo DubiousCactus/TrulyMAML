@@ -19,12 +19,13 @@ import torch
 import math
 import os
 
-from dataset import SineWaveDataset
+from tqdm.contrib import tenumerate
 from pytictoc import TicToc
 from copy import deepcopy
 from typing import List
 from tqdm import tqdm
 
+from dataset import SineWaveDataset
 from const import device
 
 
@@ -228,51 +229,43 @@ class MAML(torch.nn.Module):
                 # t.tic()
 
 
+
+    def eval_with_higher(self, dataset):
+        total_loss, batch_size, avg_batch_loss = 0, 32, 0
+        batch_count = len(dataset)//batch_size + 1
+        for i in tqdm(range(batch_count)):
+            start = i*batch_size
+            end = min(len(dataset), start + batch_size)
+            avg_batch_loss += self.eval_task_batch(dataset[start:end])
+        print(f"Total average loss: {avg_batch_loss/batch_count}")
+
     def eval(self, dataset, checkpoint):
+        def fit_and_test(task, state_dict):
+            # Restore the model parameters
+            self.learner.load_state_dict(state_dict)
+            self.adapt(task[0])
+            task_loss = 0 # Average loss per point in the task
+            with torch.no_grad():
+                self.learner.eval()
+                for x, y in task[1]:
+                    y_pred = self.learner(x)
+                    task_loss += self.inner_loss(y_pred, y) / len(x)
+            return task_loss / len(task[1])
+
+        total_loss = 0
+        # Save the model parameters
+        state_dict = deepcopy(self.learner.state_dict())
         if type(dataset) is SineWaveDataset:
-            batch_size = 32
-            avg_batch_loss = 0
-            batch_count = len(dataset)//batch_size + 1
-            for i in tqdm(range(batch_count)):
-                start = i*batch_size
-                end = min(len(dataset), start + batch_size)
-                avg_batch_loss += self.eval_task_batch(dataset[start:end])
-            print(f"Total average loss: {avg_batch_loss/batch_count}")
-            print(f"Without using higher:\n (example for inference)")
-            total_loss = 0
-            # Save the model parameters
-            state_dict = deepcopy(self.learner.state_dict())
-            for i, task in tqdm(enumerate(dataset)):
-                # Restore the model parameters
-                self.learner.load_state_dict(state_dict)
-                self.adapt(task[0])
-                with torch.no_grad():
-                    task_loss = 0 # Average loss per point in the task
-                    self.learner.eval()
-                    for x, y in task[1]:
-                        y_pred = self.learner(x)
-                        task_loss += self.inner_loss(y_pred, y) / len(x)
-                    task_loss /= len(task[1])
-                    total_loss += task_loss
+            for i, task in tenumerate(dataset, start=0, total=len(dataset)):
+                total_loss += fit_and_test(task, state_dict)
             print(f"Total average loss: {total_loss/len(dataset)}")
-        # else:
-            # for i, batch in tqdm(enumerate(dataset)):
-                # if not batch:
-                    # break
-                # for task in batch:
-                    # self.adapt(task[0])
-                    # task_loss = 0
-                    # self.learner.eval()
-                    # for x, y in task[1]:
-                        # y_pred = self.learner(x)
-                        # task_loss += self.inner_loss(y_pred, y)
-                    # task_loss /= len(task[1])
-                    # print(f"[Batch {i}] Loss={task_loss}")
-                    # total_loss += task_loss
-                    # # TODO: Restore the model parameters
-                # self.learner.parameters = params
-            # total_loss /= dataset.total_batches
-        # print(f"Total average loss: {total_loss}")
+        else:
+            for i, batch in tenumerate(dataset, start=0, total=len(dataset)):
+                if not batch:
+                    break
+                for task in batch:
+                    total_loss += fit_and_test(task, state_dict)
+            print(f"Total average loss: {total_loss/len(dataset)}")
 
 
     def restore(self, checkpoint, resume_training=True):

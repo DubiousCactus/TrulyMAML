@@ -139,7 +139,7 @@ class OmniglotDataset:
 
     @property
     def total_batches(self):
-        return self.dataset.shape[0] / self.n_way
+        return self.dataset.shape[0] // self.n_way + 1
 
     def __next__(self):
         '''
@@ -163,3 +163,6 @@ class OmniglotDataset:
             batch.append((support, query))
         self.idx += self.n_way
         return batch
+
+    def __len__(self):
+        return self.total_batches
