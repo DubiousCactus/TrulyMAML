@@ -127,6 +127,7 @@ class MAML(torch.nn.Module):
                 sprt, qry = task
                 f_learner.train()
                 for s in range(self.inner_steps):
+                    diff_opt.zero_grad()
                     step_loss = 0
                     for x, y in sprt:
                         y_pred = f_learner(x)
