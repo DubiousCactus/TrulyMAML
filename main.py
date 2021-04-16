@@ -48,7 +48,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, iterations, save_path, epoch, 1000)
+    model.fit(dataset, iterations, save_path, epoch, 100)
     print("[*] Done!")
     return model
 
@@ -159,6 +159,7 @@ def main():
         train_dataset = (SineWaveDataset(1000000, args.samples, args.k,
                 args.q, args.meta_batch_size) if args.dataset == 'sinusoid' else
                 OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=False))
+        # train_dataset = SineWaveDataset(1000, args.samples, args.k, args.q, args.meta_batch_size)
         # conventional_train(dataset, learner)
         train_with_maml(train_dataset, learner,
                 args.checkpoint_path, args.s, args.meta_batch_size,

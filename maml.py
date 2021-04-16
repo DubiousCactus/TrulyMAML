@@ -109,10 +109,10 @@ class MAML(torch.nn.Module):
                     meta_losses.append(meta_loss.detach().div_(sprt_samples))
                     inner_losses.append(inner_loss.div_(qry_samples))
 
-                # Update the model's meta-parameters to optimize the query
-                # losses across all of the tasks sampled in this batch.
-                # This unrolls through the gradient steps.
-                meta_loss.backward()
+        # Update the model's meta-parameters to optimize the query
+        # losses across all of the tasks sampled in this batch.
+        # This unrolls through the gradient steps.
+        meta_loss.backward()
 
         self.meta_opt.step()
         avg_inner_loss = sum(inner_losses) / len(tasks_batch) if return_loss else 0
@@ -203,7 +203,7 @@ class MAML(torch.nn.Module):
             pass
         global_avg_inner_loss, global_avg_meta_loss = 0, 0
         for i in range(epoch, iterations):
-            inner_loss, meta_loss = self.train_on_batch(next(dataset), i%epochs_per_avg == 0)
+            inner_loss, meta_loss = self.train_on_batch(next(dataset), True)
             global_avg_inner_loss += inner_loss
             global_avg_meta_loss += meta_loss
             if i % epochs_per_avg == 0:
