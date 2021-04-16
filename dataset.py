@@ -12,11 +12,13 @@ A few dataset wrapper classes
 
 import numpy as np
 import torchvision
+import random
 import torch
 import math
 import os
 
 from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset, SubsetRandomSampler
+from torchmeta.toy import Harmonic
 from tqdm import tqdm
 from PIL import Image
 
@@ -53,9 +55,11 @@ class SineWaveDataset:
     '''
     A dataset of random sinusoid tasks with meta-train & meta-test splits.
     '''
-    def __init__(self, tasks_num: int, samples_per_task: int, k_shot: int, k_query: int, randomize: bool):
+    def __init__(self, tasks_num: int, samples_per_task: int, k_shot: int, k_query: int,
+            meta_batch_size: int):
         print(f"[*] Generating {tasks_num} sinewaves of random phases and magnitudes...")
         self.tasks = []
+        self.meta_batch_size = meta_batch_size
         assert k_query <= samples_per_task-k_shot, "k_query too big!"
         for _ in tqdm(range(tasks_num)):
             sine_wave = SineWave(samples=samples_per_task)
@@ -65,14 +69,13 @@ class SineWaveDataset:
                     sine_wave,
                     batch_size=10,
                     # num_workers=8,
-                    sampler=SubsetRandomSampler(range(k_shot)) if randomize else list(range(k_shot)),
+                    sampler=list(range(k_shot)),
                     pin_memory=False)
             meta_test_loader = DataLoader(
                     sine_wave,
                     batch_size=10,
                     # num_workers=8,
-                    sampler=(SubsetRandomSampler(range(k_shot, len(sine_wave))) if
-                        randomize else list(range(k_shot, k_shot+k_query))),
+                    sampler=list(range(k_shot, k_shot+k_query)),
                     pin_memory=False)
             self.tasks.append((meta_train_loader, meta_test_loader))
 
@@ -85,6 +88,9 @@ class SineWaveDataset:
 
     def __len__(self):
         return len(self.tasks)
+
+    def __next__(self):
+        return random.sample(self.tasks, self.meta_batch_size)
 
 
 class OmniglotDataset:
@@ -166,3 +172,41 @@ class OmniglotDataset:
 
     def __len__(self):
         return self.total_batches
+
+
+class HarmonicDataset:
+    def __init__(self, tasks_num: int, samples_per_task: int, k_shot: int, k_query: int,
+            meta_batch_size: int):
+        print(f"[*] Generating {tasks_num} harmonic functions of random phases and magnitudes...")
+        self.tasks = []
+        self.meta_batch_size = meta_batch_size
+        assert k_query <= samples_per_task-k_shot, "k_query too big!"
+        dataset = Harmonic(samples_per_task, tasks_num, transform=lambda x: x.astype(np.float32),
+                target_transform=lambda x: x.astype(np.float32))
+        for t in tqdm(dataset):
+            meta_train_loader = DataLoader(
+                    t,
+                    batch_size=k_shot,
+                    # num_workers=8,
+                    sampler=list(range(k_shot)),
+                    pin_memory=False)
+            meta_test_loader = DataLoader(
+                    t,
+                    batch_size=k_query,
+                    # num_workers=8,
+                    sampler=list(range(k_shot, k_shot+k_query)),
+                    pin_memory=False)
+            self.tasks.append((meta_train_loader, meta_test_loader))
+
+    def __iter__(self):
+        for t in self.tasks:
+            yield t
+
+    def __getitem__(self, idx):
+        return self.tasks[idx]
+
+    def __len__(self):
+        return len(self.tasks)
+
+    def __next__(self):
+        return random.sample(self.tasks, self.meta_batch_size)

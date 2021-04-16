@@ -72,7 +72,6 @@ class MAML(torch.nn.Module):
         self.inner_loss = loss_function
         self.meta_loss = loss_function
 
-
     def train_on_batch(self, tasks_batch, return_loss=False):
         # sprt should never intersect with qry! So only shuffle the task
         # at creation!
@@ -87,31 +86,32 @@ class MAML(torch.nn.Module):
                     ) as (f_learner, diff_opt):
                 meta_loss, inner_loss = 0, 0
                 sprt, qry = task
+                sprt_samples, qry_samples = 0, 0
                 f_learner.train()
                 for s in range(self.inner_steps):
-                    step_loss, batch_len = 0, 1
+                    step_loss = 0
                     for x, y in sprt:
                         # sprt is an iterator returning batches
                         y_pred = f_learner(x)
                         step_loss += self.inner_loss(y_pred, y)
-                        batch_len = len(x)
-                    inner_loss += step_loss.detach() / batch_len
+                        sprt_samples += len(x)
+                    inner_loss += step_loss.detach()
                     diff_opt.step(step_loss)
 
                 f_learner.eval()
                 for x, y in qry:
                     y_pred = f_learner(x) # Use the updated model for that task
+                    qry_samples += len(x)
                     # Accumulate the loss over all tasks in the meta-testing set
-                    meta_loss += self.meta_loss(y_pred, y)# / len(x)
+                    meta_loss += self.meta_loss(y_pred, y)
 
                 if return_loss:
-                    meta_losses.append(meta_loss.detach()/len(qry))
-                    inner_losses.append(inner_loss/(self.inner_steps*len(sprt)))
+                    meta_losses.append(meta_loss.detach().div_(sprt_samples))
+                    inner_losses.append(inner_loss.div_(qry_samples))
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
                 # This unrolls through the gradient steps.
-                meta_loss /= len(qry)
                 meta_loss.backward()
 
         self.meta_opt.step()
@@ -120,8 +120,11 @@ class MAML(torch.nn.Module):
         # t.toc()
         return avg_inner_loss, avg_meta_loss
 
-    
     def eval_task_batch(self, task_batch):
+        '''
+        Use the Higher innerloop context to evaluate a task batch.
+        Not suited for inference, only for evaluation.
+        '''
         batch_loss = 0 # Average loss of the batch of tasks
         for task in task_batch:
             with higher.innerloop_ctx(self.learner, self.inner_opt) as (f_learner, diff_opt):
@@ -142,10 +145,10 @@ class MAML(torch.nn.Module):
                 batch_loss += qry_loss / len(qry)
         return batch_loss/len(task_batch)
 
-
     def adapt(self, task_support):
         '''
-        Adapt the model to the task using the support set
+        Adapt the model to the task using the support set. This is typically used for inference on
+        a novel task.
         '''
         self.learner.train()
         for s in range(self.inner_steps):
@@ -156,7 +159,6 @@ class MAML(torch.nn.Module):
                 step_loss += self.inner_loss(y_pred, y)
             step_loss.backward()
             self.inner_opt.step()
-
 
     def train_on_batch_mp(self, tasks_batch, return_loss=False):
         # sprt should never intersect with qry! So only shuffle the task
@@ -191,9 +193,7 @@ class MAML(torch.nn.Module):
         self.meta_opt.step()
         return total_meta_loss / len(tasks_batch) if return_loss else 0
 
-
-    def fit(self, dataset, tasks_per_iter: int, iterations: int,
-            save_path: str, epoch: int):
+    def fit(self, dataset, iterations: int, save_path: str, epoch: int, epochs_per_avg=1000):
         self.learner.train()
         # t = TicToc()
         # t.tic()
@@ -203,18 +203,14 @@ class MAML(torch.nn.Module):
             pass
         global_avg_inner_loss, global_avg_meta_loss = 0, 0
         for i in range(epoch, iterations):
-            if type(dataset) == list:
-                random.shuffle(dataset)
-                inner_loss, meta_loss = self.train_on_batch(dataset[:tasks_per_iter], i%1000 == 0)
-            else:
-                inner_loss, meta_loss = self.train_on_batch(next(dataset), i%1000 == 0)
+            inner_loss, meta_loss = self.train_on_batch(next(dataset), i%epochs_per_avg == 0)
             global_avg_inner_loss += inner_loss
             global_avg_meta_loss += meta_loss
-            if i % 1000 == 0:
+            if i % epochs_per_avg == 0:
                 if i != 0:
-                    global_avg_inner_loss /= 1000
-                    global_avg_meta_loss /= 1000
-                print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Meta-testing Loss={global_avg_meta_loss} (averaged over 1000 epochs)")
+                    global_avg_inner_loss /= epochs_per_avg
+                    global_avg_meta_loss /= epochs_per_avg
+                print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Outer Loss={global_avg_meta_loss} (over {epochs_per_avg} epochs) - Last Outer loss={meta_loss}")
                 torch.save({
                     'epoch': i,
                     'model_state_dict': self.learner.state_dict(),
@@ -227,8 +223,6 @@ class MAML(torch.nn.Module):
                 global_avg_meta_loss = 0
                 # t.toc()
                 # t.tic()
-
-
 
     def eval_with_higher(self, dataset):
         total_loss, batch_size, avg_batch_loss = 0, 32, 0
@@ -266,7 +260,6 @@ class MAML(torch.nn.Module):
                 for task in batch:
                     total_loss += fit_and_test(task, state_dict)
             print(f"Total average loss: {total_loss/len(dataset)}")
-
 
     def restore(self, checkpoint, resume_training=True):
         self.learner.load_state_dict(checkpoint['model_state_dict'])

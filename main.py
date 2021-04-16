@@ -17,8 +17,8 @@ import torch
 import sys
 import os
 
+from dataset import SineWaveDataset, OmniglotDataset, HarmonicDataset
 from learner import DummiePolyLearner, MLP, ConvNetClassifier
-from dataset import SineWaveDataset, OmniglotDataset
 from const import device
 from maml import MAML
 
@@ -32,9 +32,10 @@ from pytictoc import TicToc
 # [x] Restore model state
 # [x] Implement meta-testing (model evaluation)
 # [x] Implement OmniGlot classification
+# [ ] Dataset factory
 # [ ] Clip the gradients to prevent NaN loss!
+# [ ] Normalize OmniGlot
 # [ ] Implement data generator for sine waves, and use it for on-the-fly batch generation
-# [ ] Try to vectorize the batch of tasks for faster training
 # [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
 
 
@@ -47,7 +48,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, meta_batch_size, iterations, save_path, epoch)
+    model.fit(dataset, iterations, save_path, epoch, 1000)
     print("[*] Done!")
     return model
 
@@ -129,7 +130,7 @@ def parse_args():
     classification''')
     parser.add_argument('-s', type=int, default=1, help='''Number of inner loop
     optimization steps during meta-training''')
-    parser.add_argument('--dataset', choices=['omniglot', 'sinusoid'])
+    parser.add_argument('--dataset', choices=['omniglot', 'sinusoid', 'harmonic'])
     parser.add_argument('--meta-batch-size', type=int, default=25, help='''Number
     of tasks per meta-update''')
     parser.add_argument('--iterations', type=int, default=80000, help='''Number
@@ -140,28 +141,29 @@ def parse_args():
 
 def main():
     args = parse_args()
-    np.random.seed(5)
+    # np.random.seed(5)
 
-    learner = MLP(device) if args.dataset == "sinusoid" else ConvNetClassifier(device, 1, 20)
+    learner = ConvNetClassifier(device, 1, 20) if args.dataset == "omniglot" else MLP(device)
     checkpoint = None
     if args.load:
         checkpoint = torch.load(args.load)
     learner.to(device)
+    # TODO: Factory for the Dataset
     if args.eval:
         test_dataset = (SineWaveDataset(1000, args.samples, args.k,
-            args.q, False) if args.dataset == 'sinusoid' else
+            args.q, args.meta_batch_size) if args.dataset == 'sinusoid' else
             OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=True))
         test_with_maml(test_dataset, learner, checkpoint, args.s, torch.nn.MSELoss(reduction='sum')
                 if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
     else:
         train_dataset = (SineWaveDataset(1000000, args.samples, args.k,
-                args.q, False) if args.dataset == 'sinusoid' else
+                args.q, args.meta_batch_size) if args.dataset == 'sinusoid' else
                 OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=False))
         # conventional_train(dataset, learner)
         train_with_maml(train_dataset, learner,
                 args.checkpoint_path, args.s, args.meta_batch_size,
-                args.iterations, checkpoint, torch.nn.MSELoss(reduction='sum') if args.dataset ==
-                "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
+                args.iterations, checkpoint, torch.nn.CrossEntropyLoss(reduction='sum') if
+                args.dataset == 'omniglot' else torch.nn.MSELoss(reduction='sum'))
 
 
 if __name__ == "__main__":
