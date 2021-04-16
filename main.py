@@ -17,7 +17,7 @@ import torch
 import sys
 import os
 
-from dataset import SineWaveDataset, OmniglotDataset, HarmonicDataset
+from dataset import SineWaveDataset, OmniglotDataset, HarmonicDataset, SinusoidAndLineDataset
 from learner import DummiePolyLearner, MLP, ConvNetClassifier
 from const import device
 from maml import MAML

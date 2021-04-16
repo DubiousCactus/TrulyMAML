@@ -18,12 +18,14 @@ import math
 import os
 
 from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset, SubsetRandomSampler
-from torchmeta.toy import Harmonic
+from torchmeta.toy import Harmonic, SinusoidAndLine
 from tqdm import tqdm
 from PIL import Image
 
 from const import device
 
+
+# TODO: Some heavy refactoring needed!
 
 class SineWave(Dataset):
     def __init__(self, samples=20):
@@ -182,6 +184,44 @@ class HarmonicDataset:
         self.meta_batch_size = meta_batch_size
         assert k_query <= samples_per_task-k_shot, "k_query too big!"
         dataset = Harmonic(samples_per_task, tasks_num, transform=lambda x: x.astype(np.float32),
+                target_transform=lambda x: x.astype(np.float32))
+        for t in tqdm(dataset):
+            meta_train_loader = DataLoader(
+                    t,
+                    batch_size=k_shot,
+                    # num_workers=8,
+                    sampler=list(range(k_shot)),
+                    pin_memory=False)
+            meta_test_loader = DataLoader(
+                    t,
+                    batch_size=k_query,
+                    # num_workers=8,
+                    sampler=list(range(k_shot, k_shot+k_query)),
+                    pin_memory=False)
+            self.tasks.append((meta_train_loader, meta_test_loader))
+
+    def __iter__(self):
+        for t in self.tasks:
+            yield t
+
+    def __getitem__(self, idx):
+        return self.tasks[idx]
+
+    def __len__(self):
+        return len(self.tasks)
+
+    def __next__(self):
+        return random.sample(self.tasks, self.meta_batch_size)
+
+
+class SinusoidAndLineDataset:
+    def __init__(self, tasks_num: int, samples_per_task: int, k_shot: int, k_query: int,
+            meta_batch_size: int):
+        print(f"[*] Generating {tasks_num} sinusoid and line functions of random phases and magnitudes or random slopes and intercepts...")
+        self.tasks = []
+        self.meta_batch_size = meta_batch_size
+        assert k_query <= samples_per_task-k_shot, "k_query too big!"
+        dataset = SinusoidAndLine(samples_per_task, tasks_num, transform=lambda x: x.astype(np.float32),
                 target_transform=lambda x: x.astype(np.float32))
         for t in tqdm(dataset):
             meta_train_loader = DataLoader(
