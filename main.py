@@ -48,7 +48,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, iterations, save_path, epoch, 100)
+    model.fit(dataset, iterations, save_path, epoch, 1000)
     print("[*] Done!")
     return model
 
@@ -61,7 +61,7 @@ def test_with_maml(dataset, learner, checkpoint, steps, loss_fn):
         model.restore(checkpoint, resume_training=False)
     else:
         print("[!] You are running inference on a randomly initialized model!")
-    model.eval(dataset, checkpoint)
+    model.eval(dataset)
     print("[*] Done!")
 
 

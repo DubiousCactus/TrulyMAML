@@ -98,7 +98,7 @@ class SineWaveDataset:
 class OmniglotDataset:
     def __init__(self, batch_size: int, img_size: int, k_shot: int, k_query: int, n_way: int,
             evaluation: bool = False):
-        assert k_shot + k_query <= 20, "Not enough samples per class for such k-shot and k-query values!"
+        assert (k_shot + k_query) <= 20, "Not enough samples per class for such k-shot and k-query values!"
         self.idx = 0
         self.k_shot = k_shot
         self.k_query = k_query
