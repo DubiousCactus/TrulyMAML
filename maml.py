@@ -102,8 +102,7 @@ class MAML(torch.nn.Module):
 
                 # Divide by the number of samples because reduction is set to 'sum' so that
                 # the meta-objective can be computed correctly.
-                # meta_losses.append(meta_loss.detach().div_(sprt_samples))
-                meta_losses.append(meta_loss.detach().div_(len(sprt.dataset)))
+                meta_losses.append(meta_loss.detach().div_(self.inner_steps*len(sprt.dataset)))
                 inner_losses.append(inner_loss.mean().div_(len(qry.dataset)))
 
                 # Update the model's meta-parameters to optimize the query
