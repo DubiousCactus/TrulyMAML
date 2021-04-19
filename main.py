@@ -156,7 +156,7 @@ def main():
         test_with_maml(test_dataset, learner, checkpoint, args.s, torch.nn.MSELoss(reduction='sum')
                 if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
     else:
-        train_dataset = (SineWaveDataset(1000000, args.samples, args.k,
+        train_dataset = (SineWaveDataset(10000, args.samples, args.k,
                 args.q, args.meta_batch_size) if args.dataset == 'sinusoid' else
                 OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=False))
         # train_dataset = SineWaveDataset(1000, args.samples, args.k, args.q, args.meta_batch_size)
