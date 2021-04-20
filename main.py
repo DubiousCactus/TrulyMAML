@@ -48,7 +48,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, iterations, save_path, epoch, 1000)
+    model.fit(dataset, iterations, save_path, epoch, 10)
     print("[*] Done!")
     return model
 

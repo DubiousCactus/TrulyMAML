@@ -71,18 +71,19 @@ class MAML(torch.nn.Module):
                 lr=self.inner_lr)
         self.inner_loss = loss_function
         self.meta_loss = loss_function
+        self._compute_accuracy = type(self.inner_loss) is torch.nn.CrossEntropyLoss
 
     def train_on_batch(self, tasks_batch):
         # sprt should never intersect with qry! So only shuffle the task
         # at creation!
         # For each task in the batch
-        inner_losses, meta_losses = [], []
+        inner_losses, meta_losses, accuracies = [], [], []
         self.meta_opt.zero_grad()
         for i, task in enumerate(tasks_batch):
             with higher.innerloop_ctx(
                     self.learner, self.inner_opt, copy_initial_weights=False
                     ) as (f_learner, diff_opt):
-                meta_loss, inner_loss = 0, 0
+                meta_loss, inner_loss, task_accuracies = 0, 0, []
                 sprt, qry = task
                 f_learner.train()
                 for s in range(self.inner_steps):
@@ -99,11 +100,17 @@ class MAML(torch.nn.Module):
                     y_pred = f_learner(x) # Use the updated model for that task
                     # Accumulate the loss over all tasks in the meta-testing set
                     meta_loss += self.meta_loss(y_pred, y)
+                    if self._compute_accuracy:
+                        scores, indices = y_pred.max(dim=1)
+                        acc = (y == indices).sum() / y.size(0)
+                        task_accuracies.append(acc)
 
                 # Divide by the number of samples because reduction is set to 'sum' so that
                 # the meta-objective can be computed correctly.
                 meta_losses.append(meta_loss.detach().div_(self.inner_steps*len(sprt.dataset)))
                 inner_losses.append(inner_loss.mean().div_(len(qry.dataset)))
+                if self._compute_accuracy:
+                    accuracies.append(torch.tensor(task_accuracies).mean())
 
                 # Update the model's meta-parameters to optimize the query
                 # losses across all of the tasks sampled in this batch.
@@ -113,7 +120,8 @@ class MAML(torch.nn.Module):
         self.meta_opt.step()
         avg_inner_loss = torch.tensor(inner_losses).mean()
         avg_meta_loss = torch.tensor(meta_losses).mean()
-        return avg_inner_loss, avg_meta_loss
+        avg_accuracy = torch.tensor(accuracies).mean()
+        return avg_inner_loss, avg_meta_loss, avg_accuracy
 
     def eval_task_batch(self, task_batch):
         '''
@@ -196,16 +204,18 @@ class MAML(torch.nn.Module):
             os.makedirs(save_path)
         except Exception:
             pass
-        global_avg_inner_loss, global_avg_meta_loss, best_ckpt = 0, 0, 1000
+        global_avg_inner_loss, global_avg_meta_loss, global_avg_accuracy, best_ckpt = 0, 0, 0, 1000
         for i in range(epoch, iterations):
-            inner_loss, meta_loss = self.train_on_batch(next(dataset))
+            inner_loss, meta_loss, accuracy = self.train_on_batch(next(dataset))
             global_avg_inner_loss += inner_loss
             global_avg_meta_loss += meta_loss
+            global_avg_accuracy += accuracy
             if i % epochs_per_avg == 0:
                 if i != 0:
                     global_avg_inner_loss /= epochs_per_avg
                     global_avg_meta_loss /= epochs_per_avg
-                print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Outer Loss={global_avg_meta_loss} (over {epochs_per_avg} epochs) - Last Outer loss={meta_loss}")
+                    global_avg_accuracy /= epochs_per_avg
+                print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Outer Loss={global_avg_meta_loss} - Avg Outer Accuracy={accuracy:.2f} (over {epochs_per_avg} epochs) - Last Outer loss={meta_loss}")
                 if meta_loss < best_ckpt:
                     torch.save({
                         'epoch': i,
@@ -218,6 +228,7 @@ class MAML(torch.nn.Module):
                     best_ckpt = meta_loss
                 global_avg_inner_loss = 0
                 global_avg_meta_loss = 0
+                global_avg_accuracy = 0
                 # t.toc()
                 # t.tic()
 
