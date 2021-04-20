@@ -224,7 +224,8 @@ class MAML(torch.nn.Module):
                         'meta_opt_state_dict': self.meta_opt.state_dict(),
                         'inner_loss': self.inner_loss,
                         'meta_loss': self.meta_loss
-                        }, os.path.join(save_path, f"epoch_{i}_loss-{meta_loss}.tar"))
+                        }, os.path.join(save_path,
+                            f"epoch_{i}_loss-{meta_loss:.6f}_accuracy-{accuracy:.2f}.tar"))
                     best_ckpt = meta_loss
                 global_avg_inner_loss = 0
                 global_avg_meta_loss = 0

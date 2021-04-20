@@ -19,6 +19,7 @@ import os
 
 from torch.utils.data import Dataset, DataLoader, TensorDataset, ConcatDataset, SubsetRandomSampler
 from torchmeta.toy import Harmonic, SinusoidAndLine
+from queue import SimpleQueue
 from pytictoc import TicToc
 from tqdm import tqdm
 from PIL import Image
@@ -155,7 +156,7 @@ class SinusoidAndLineDataset(RegressionDataset):
 
 
 class OmniglotDataset:
-    def __init__(self, batch_size: int, img_size: int, k_shot: int, k_query: int, n_way: int,
+    def __init__(self, meta_batch_size: int, img_size: int, k_shot: int, k_query: int, n_way: int,
             evaluation: bool = False):
         assert (k_shot + k_query) <= 20, "Not enough samples per class for such k-shot and k-query values!"
         self.idx = 0
@@ -164,17 +165,19 @@ class OmniglotDataset:
         self.n_way = n_way
         self.eval = evaluation
         self.img_size = img_size
+        self.meta_batch_size = meta_batch_size
         path = os.path.join('datasets', 'omniglot.npy')
         if os.path.exists(path) and device == "cpu":
             print("[*] Loading Omniglot from a saved file...")
             self.dataset = np.load(path)
         else:
             print("[*] Loading and preparing Omniglot...")
-            self.dataset = self._load(not evaluation, img_size, batch_size)
+            self.dataset = self._load(not evaluation, img_size)
             if device == "cpu":
                 np.save(path, self.dataset)
+        self._cache = self._load_in_cache()
 
-    def _load(self, background, img_size, batch_size):
+    def _load(self, background, img_size):
         dataset = torchvision.datasets.Omniglot(root='./datasets/',
                 download=True, background=background,
                 transform=torchvision.transforms.Compose([
@@ -183,7 +186,6 @@ class OmniglotDataset:
                     lambda x: np.reshape(x, (img_size, img_size, 1)),
                     lambda x: np.transpose(x, [2, 0, 1]),
                     lambda x: x/255.]))
-        self.loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
         # TODO: pin memory or load on GPU?
         tmp = dict()
         data = []
@@ -201,6 +203,48 @@ class OmniglotDataset:
         t.close()
         return data
 
+    def _load_in_cache(self, size=100):
+        print("[*] Loading data cache...")
+        cache = SimpleQueue()
+        for _ in tqdm(range(size)):
+            batch = []
+            spt_sz, qry_sz = self.n_way * self.k_shot, self.n_way * self.k_query
+            for i in range(self.meta_batch_size):
+                classes = (np.random.choice(self.dataset.shape[0], self.n_way, False) if not self.eval
+                        else list(range(self.idx, min(self.dataset.shape[0], self.idx+self.n_way))))
+                x_spt, y_spt, x_qry, y_qry = [], [], [], []
+                for j, class_ in enumerate(classes):
+                    samples = (np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False) if not self.eval
+                            else list(range(self.k_shot+self.k_query)))
+                    x_spt.append(self.dataset[class_][samples[:self.k_shot]])
+                    y_spt.append(torch.tensor([j]*self.k_shot, device=device))
+                    x_qry.append(self.dataset[class_][samples[self.k_shot:]])
+                    y_qry.append(torch.tensor([j]*self.k_query, device=device))
+
+                # Shuffle the batch
+                perm = torch.randperm(spt_sz)
+                x_spt = torch.stack(x_spt, dim=0).reshape(spt_sz, 1, self.img_size, self.img_size)[perm]
+                y_spt = torch.stack(y_spt, dim=0).reshape(spt_sz)[perm]
+                perm = torch.randperm(qry_sz)
+                x_qry = torch.stack(x_qry, dim=0).reshape(qry_sz, 1, self.img_size, self.img_size)[perm]
+                y_qry = torch.stack(y_qry, dim=0).reshape(qry_sz)[perm]
+
+                spt_loader = DataLoader(
+                        list(zip(x_spt, y_spt)),
+                        batch_size=self.k_shot,
+                        shuffle=False,
+                        pin_memory=False)
+                qry_loader = DataLoader(
+                        list(zip(x_qry, y_qry)),
+                        batch_size=self.k_query,
+                        shuffle=False,
+                        pin_memory=False)
+                batch.append((spt_loader, qry_loader))
+            if self.eval:
+                self.idx += self.n_way
+            cache.put(batch) # Should not need exception handling
+        return cache
+
     def __iter__(self):
         self.idx = 0
         return self
@@ -209,70 +253,13 @@ class OmniglotDataset:
     def total_batches(self):
         return self.dataset.shape[0] // self.n_way + 1
 
-    @property
-    def meta_batch_size(self):
-        return self.n_way
-
     def __next__(self):
         '''
         Build a batch of N (for N-way classification) tasks, where each task is a random class.
         '''
-        t = TicToc()
-        # t.tic()
-        batch = []
-        spt_sz, qry_sz = self.n_way * self.k_shot, self.n_way * self.k_query
-        for i in range(self.meta_batch_size):
-            classes = (np.random.choice(self.dataset.shape[0], self.n_way, False) if not self.eval
-                    else list(range(self.idx, min(self.dataset.shape[0], self.idx+self.n_way))))
-            x_spt, y_spt, x_qry, y_qry = [], [], [], []
-            for j, class_ in enumerate(classes):
-                samples = (np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False) if not self.eval
-                        else list(range(self.k_shot+self.k_query)))
-                x_spt.append(self.dataset[class_][samples[:self.k_shot]])
-                y_spt.append(torch.tensor([j]*self.k_shot, device=device))
-                x_qry.append(self.dataset[class_][samples[self.k_shot:]])
-                y_qry.append(torch.tensor([j]*self.k_query, device=device))
-
-            # Shuffle the batch
-            perm = torch.randperm(spt_sz)
-            x_spt = torch.stack(x_spt, dim=0).reshape(spt_sz, 1, self.img_size, self.img_size)[perm]
-            y_spt = torch.stack(y_spt, dim=0).reshape(spt_sz)[perm]
-            perm = torch.randperm(qry_sz)
-            x_qry = torch.stack(x_qry, dim=0).reshape(qry_sz, 1, self.img_size, self.img_size)[perm]
-            y_qry = torch.stack(y_qry, dim=0).reshape(qry_sz)[perm]
-
-            spt_loader = DataLoader(
-                    list(zip(x_spt, y_spt)),
-                    batch_size=self.k_shot,
-                    shuffle=False,
-                    pin_memory=False)
-            qry_loader = DataLoader(
-                    list(zip(x_qry, y_qry)),
-                    batch_size=self.k_query,
-                    shuffle=False,
-                    pin_memory=False)
-            batch.append((spt_loader, qry_loader))
-
-
-        # classes = (np.random.choice(self.dataset.shape[0], self.n_way, False) if not self.eval
-                # else list(range(self.idx, min(self.dataset.shape[0], self.idx+self.n_way))))
-        # for i, class_ in enumerate(classes):
-            # samples = (np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False) if not self.eval
-                    # else list(range(self.k_shot+self.k_query)))
-            # support = DataLoader(
-                    # list(zip(self.dataset[class_][samples[:self.k_shot]], torch.tensor([i]*self.k_shot, device=device))),
-                    # batch_size=self.k_shot,
-                    # shuffle=False,
-                    # pin_memory=False)
-            # query = DataLoader(
-                    # list(zip(self.dataset[class_][samples[self.k_shot:]], torch.tensor([i]*self.k_query, device=device))),
-                    # batch_size=self.k_query,
-                    # shuffle=False,
-                    # pin_memory=False)
-            # batch.append((support, query))
-        if self.eval:
-            self.idx += self.n_way
-        # t.toc()
+        if self._cache.empty():
+            self._cache = self._load_in_cache()
+        batch = self._cache.get()
         return batch
 
     def __len__(self):
