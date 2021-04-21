@@ -102,7 +102,7 @@ class MAML(torch.nn.Module):
                     meta_loss += self.meta_loss(y_pred, y)
                     if self._compute_accuracy:
                         scores, indices = y_pred.max(dim=1)
-                        acc = (y == indices).sum() / y.size(0)
+                        acc = (y == indices).sum() / y.size(0) # Mean accuracy per batch
                         task_accuracies.append(acc)
 
                 # Divide by the number of samples because reduction is set to 'sum' so that
@@ -118,9 +118,9 @@ class MAML(torch.nn.Module):
                 meta_loss.backward()
 
         self.meta_opt.step()
-        avg_inner_loss = torch.tensor(inner_losses).mean()
-        avg_meta_loss = torch.tensor(meta_losses).mean()
-        avg_accuracy = torch.tensor(accuracies).mean()
+        avg_inner_loss = torch.tensor(inner_losses).mean().item()
+        avg_meta_loss = torch.tensor(meta_losses).mean().item()
+        avg_accuracy = torch.tensor(accuracies).mean().item()
         return avg_inner_loss, avg_meta_loss, avg_accuracy
 
     def eval_task_batch(self, task_batch):
@@ -156,11 +156,12 @@ class MAML(torch.nn.Module):
         self.learner.train()
         for s in range(self.inner_steps):
             self.inner_opt.zero_grad()
-            step_loss = 0
+            # step_loss = 0
             for x, y in task_support:
                 y_pred = self.learner(x)
-                step_loss += self.inner_loss(y_pred, y)
-            step_loss.backward()
+                loss = self.inner_loss(y_pred, y)
+                loss.backward()
+            # step_loss.backward()
             self.inner_opt.step()
 
     def train_on_batch_mp(self, tasks_batch, return_loss=False):
@@ -216,7 +217,7 @@ class MAML(torch.nn.Module):
                     global_avg_meta_loss /= epochs_per_avg
                     global_avg_accuracy /= epochs_per_avg
                 print(f"[{i}] Avg Inner Loss={global_avg_inner_loss} - Avg Outer Loss={global_avg_meta_loss} - Avg Outer Accuracy={accuracy:.2f} (over {epochs_per_avg} epochs) - Last Outer loss={meta_loss}")
-                if meta_loss < best_ckpt:
+                if global_avg_meta_loss < best_ckpt:
                     torch.save({
                         'epoch': i,
                         'model_state_dict': self.learner.state_dict(),
@@ -225,8 +226,8 @@ class MAML(torch.nn.Module):
                         'inner_loss': self.inner_loss,
                         'meta_loss': self.meta_loss
                         }, os.path.join(save_path,
-                            f"epoch_{i}_loss-{meta_loss:.6f}_accuracy-{accuracy:.2f}.tar"))
-                    best_ckpt = meta_loss
+                            f"epoch_{i}_loss-{global_avg_meta_loss:.6f}_accuracy-{global_avg_accuracy:.2f}.tar"))
+                    best_ckpt = global_avg_meta_loss
                 global_avg_inner_loss = 0
                 global_avg_meta_loss = 0
                 global_avg_accuracy = 0
@@ -242,33 +243,43 @@ class MAML(torch.nn.Module):
             # avg_batch_loss += self.eval_task_batch(dataset[start:end])
     #     print(f"Total average loss: {avg_batch_loss/batch_count}")
 
-    def eval(self, dataset):
-        def fit_and_test(task, state_dict):
+    def eval(self, dataset, compute_accuracy=False):
+        def fit_and_test(task, state_dict, comp_acc=False):
             # Restore the model parameters
             self.learner.load_state_dict(state_dict)
             self.adapt(task[0])
-            task_loss = 0 # Average loss per point in the task
+            task_loss, task_accuracies = 0, [] # Average loss per point in the task
             with torch.no_grad():
                 self.learner.eval()
                 for x, y in task[1]:
                     y_pred = self.learner(x)
                     task_loss += self.inner_loss(y_pred, y)
-            return task_loss.div_(len(task[1].dataset)) # Average per item because the inner loss reduction is 'sum'
+                    if comp_acc:
+                        _, indices = y_pred.max(dim=1)
+                        mean_acc = (y == indices).sum() / y.size(0)
+                        task_accuracies.append(mean_acc) # Mean accuracy per batch
+             # Average per item because the inner loss reduction is 'sum'
+            return task_loss.div_(len(task[1].dataset)), torch.tensor(task_accuracies).mean()
 
-        total_loss = []
+        total_loss, total_acc = [], []
         # Save the model parameters
         state_dict = deepcopy(self.learner.state_dict())
         t = tqdm(total=len(dataset))
         for i, batch in enumerate(dataset):
             if not batch:
+                t.close()
                 break
-            batch_loss = []
+            batch_loss, batch_accuracy = [], []
             for task in batch:
-                batch_loss.append(fit_and_test(task, state_dict))
-            t.update(len(batch))
+                loss, acc = fit_and_test(task, state_dict, comp_acc=compute_accuracy)
+                batch_loss.append(loss)
+                batch_accuracy.append(acc)
             total_loss.append(torch.tensor(batch_loss).mean())
-        total_loss = torch.tensor(total_loss).mean()
-        print(f"Total average loss: {total_loss}")
+            total_acc.append(torch.tensor(batch_accuracy).mean())
+            t.update(len(batch))
+        total_loss = torch.tensor(total_loss).mean().item()
+        total_acc = torch.tensor(total_acc).mean().item() if compute_accuracy else .0
+        print(f"Total average loss: {total_loss} - Total average accuracy: {total_acc:.4f}")
 
     def restore(self, checkpoint, resume_training=True):
         self.learner.load_state_dict(checkpoint['model_state_dict'])

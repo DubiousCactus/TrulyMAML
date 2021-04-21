@@ -35,7 +35,6 @@ from pytictoc import TicToc
 # [ ] Dataset factory
 # [ ] Clip the gradients to prevent NaN loss!
 # [ ] Normalize OmniGlot
-# [ ] Implement data generator for sine waves, and use it for on-the-fly batch generation
 # [ ] Implement multiprocessing if possible (https://discuss.pytorch.org/t/multiprocessing-with-tensors-requires-grad/87475/2)
 
 
@@ -48,7 +47,7 @@ def train_with_maml(dataset, learner, save_path: str, steps: int,
     if checkpoint:
         model.restore(checkpoint)
         epoch = checkpoint['epoch']
-    model.fit(dataset, iterations, save_path, epoch, 10)
+    model.fit(dataset, iterations, save_path, epoch, 100)
     print("[*] Done!")
     return model
 
@@ -61,7 +60,7 @@ def test_with_maml(dataset, learner, checkpoint, steps, loss_fn):
         model.restore(checkpoint, resume_training=False)
     else:
         print("[!] You are running inference on a randomly initialized model!")
-    model.eval(dataset)
+    model.eval(dataset, compute_accuracy=(type(dataset) is OmniglotDataset))
     print("[*] Done!")
 
 
@@ -151,8 +150,8 @@ def main():
     # TODO: Factory for the Dataset
     if args.eval:
         test_dataset = (SineWaveDataset(1000, args.samples, args.k,
-            args.q, args.meta_batch_size) if args.dataset == 'sinusoid' else
-            OmniglotDataset(args.meta_batch_size, 28, args.k, args.q, args.n, evaluation=True))
+            args.q, 1) if args.dataset == 'sinusoid' else
+            OmniglotDataset(1, 28, args.k, args.q, args.n, evaluation=True))
         test_with_maml(test_dataset, learner, checkpoint, args.s, torch.nn.MSELoss(reduction='sum')
                 if args.dataset == "sinusoid" else torch.nn.CrossEntropyLoss(reduction='sum'))
     else:

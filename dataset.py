@@ -203,15 +203,16 @@ class OmniglotDataset:
         t.close()
         return data
 
-    def _load_in_cache(self, size=100):
-        print("[*] Loading data cache...")
+    def _load_in_cache(self, batch_size=100):
         cache = SimpleQueue()
-        for _ in tqdm(range(size)):
+        for _ in range(batch_size):
             batch = []
-            spt_sz, qry_sz = self.n_way * self.k_shot, self.n_way * self.k_query
             for i in range(self.meta_batch_size):
                 classes = (np.random.choice(self.dataset.shape[0], self.n_way, False) if not self.eval
                         else list(range(self.idx, min(self.dataset.shape[0], self.idx+self.n_way))))
+                if self.eval and not classes:
+                    cache.put([])
+                    return cache
                 x_spt, y_spt, x_qry, y_qry = [], [], [], []
                 for j, class_ in enumerate(classes):
                     samples = (np.random.choice(self.dataset.shape[1], self.k_shot+self.k_query, False) if not self.eval
@@ -222,6 +223,7 @@ class OmniglotDataset:
                     y_qry.append(torch.tensor([j]*self.k_query, device=device))
 
                 # Shuffle the batch
+                spt_sz, qry_sz = len(classes) * self.k_shot, len(classes) * self.k_query
                 perm = torch.randperm(spt_sz)
                 x_spt = torch.stack(x_spt, dim=0).reshape(spt_sz, 1, self.img_size, self.img_size)[perm]
                 y_spt = torch.stack(y_spt, dim=0).reshape(spt_sz)[perm]
@@ -240,8 +242,8 @@ class OmniglotDataset:
                         shuffle=False,
                         pin_memory=False)
                 batch.append((spt_loader, qry_loader))
-            if self.eval:
-                self.idx += self.n_way
+                if self.eval:
+                    self.idx += self.n_way
             cache.put(batch) # Should not need exception handling
         return cache
 
@@ -251,17 +253,19 @@ class OmniglotDataset:
 
     @property
     def total_batches(self):
-        return self.dataset.shape[0] // self.n_way + 1
+        return self.dataset.shape[0] // self.n_way // self.meta_batch_size + 1
 
     def __next__(self):
         '''
         Build a batch of N (for N-way classification) tasks, where each task is a random class.
         '''
         if self._cache.empty():
+            torch.cuda.empty_cache()
+            torch.cuda.ipc_collect()
             self._cache = self._load_in_cache()
         batch = self._cache.get()
         return batch
 
     def __len__(self):
-        return self.total_batches
+        return self.total_batches * self.meta_batch_size
 
