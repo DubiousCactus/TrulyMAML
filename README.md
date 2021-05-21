@@ -1,10 +1,39 @@
-# Model-Agnostic Meta-Learning
+# Clean and *truly* model-agnostic PyTorch implementation of MAML
 
 This is a custom implementation of the paper [Model-Agnostic Meta-Learning (Finn et
 al.)](https://arxiv.org/abs/1703.03400), using [Higher](https://github.com/facebookresearch/higher)
 for second-order optimization, thus making this framework **truly** model-agnostic. Compared to
 other implementations, the optimizee does not need to be constructed for MAML, you can just plug in
 any PyTorch model into `MAML`!
+
+See this example from `learner.py`:
+
+```
+class ConvNetClassifier(nn.Module):
+    def __init__(self, device, input_channels: int, n_classes: int):
+        super().__init__()
+        self.cnn = nn.Sequential(
+                nn.Conv2d(input_channels, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU(),
+                nn.Conv2d(64, 64, 3),
+                nn.BatchNorm2d(64),
+                nn.ReLU())
+        self.flc = nn.Sequential(
+                nn.Linear(64*20*20, n_classes)).to(device)
+
+    def forward(self, x):
+        x = self.cnn(x)
+        x = x.view(x.size(0), -1)
+        x = self.flc(x)
+        return x
+```
 
 
 ## Usage
