@@ -41,6 +41,9 @@ class ConvNetClassifier(nn.Module):
 
 ## Usage
 
+This implementation ships with the OmniGlot dataset for classification, and a few simple toy regression datasets (sinusoid, harmonic, etc.).
+To use other datasets, you will need to write your own Dataset class, following the given interface (**TODO**).
+
 ```
 usage: main.py [-h] [--checkpoint_path CHECKPOINT_PATH] [--load LOAD] [--eval] [--samples SAMPLES] [-k K] [-q Q] [-n N] [-s S]
                [--dataset {omniglot,sinusoid,harmonic}] [--meta-batch-size META_BATCH_SIZE] [--iterations ITERATIONS]
