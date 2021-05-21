@@ -6,7 +6,7 @@ MAML](https://notes.theomorales.com/MAML/A+Gentle+Introduction+to+Meta-Learning)
 This is a custom implementation of the paper [Model-Agnostic Meta-Learning (Finn et
 al.)](https://arxiv.org/abs/1703.03400), using [Higher](https://github.com/facebookresearch/higher)
 for second-order optimization, thus making this framework **truly** model-agnostic. Compared to
-other implementations, the optimizee does not need to be constructed for MAML, you can just plug in
+other implementations, the optimizee does not need to be constructed specifically for MAML, you can just plug in
 any PyTorch model into `MAML`!
 
 See this example from `learner.py`:
