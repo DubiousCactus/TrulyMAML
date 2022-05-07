@@ -1,7 +1,7 @@
 # Clean and *truly* model-agnostic PyTorch implementation of MAML
 
 :point_right: Check out [my blog post on
-MAML](https://notes.theomorales.com/MAML/A+Gentle+Introduction+to+Meta-Learning)! :writing_hand:
+MAML](https://notes.theomorales.com/Meta-Learning/A+Gentle+Introduction+to+Meta-Learning)! :writing_hand:
 
 This is a custom implementation of the paper [Model-Agnostic Meta-Learning (Finn et
 al.)](https://arxiv.org/abs/1703.03400), using [Higher](https://github.com/facebookresearch/higher)
